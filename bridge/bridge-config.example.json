@@ -16,7 +16,7 @@
     }
   },
   "tts": {
-    "model_name": "C:/你的QwenTTS模型目录/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+    "model_name": "C:/你的QwenTTS模型目录/Qwen3-TTS-12Hz-1.7B-Base",
     "device": "cuda",
     "dtype": "auto",
     "attn_implementation": "eager",

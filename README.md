@@ -166,31 +166,20 @@ huggingface-cli download openai/whisper-large-v3
 
 > 下载慢或失败？见"常见问题"第 2 条（HF 镜像）。
 
-### 2. TTS 模型：Qwen3-TTS-12Hz-1.7B-VoiceDesign（手动准备）
+### 2. TTS 模型：Qwen3-TTS-12Hz-1.7B-Base（声音克隆模型，手动准备）
 
-音色克隆模型，需要**一个本地模型目录**（含权重文件）。两种获取方式任选：
+⚠️ **必须用 Base 版本**：`Qwen/Qwen3-TTS-12Hz-1.7B-Base` 才支持"映射克隆"（用参考音频克隆音色）。网上流传的 **VoiceDesign 版本不支持克隆**，别下错了。
 
-**方式 A：用 ComfyUI 自动下载（推荐给已有 ComfyUI 的人）**
-
-1. 装 ComfyUI（<https://github.com/comfyanonymous/ComfyUI>）和 ComfyUI-Qwen3-TTS 节点；
-2. 节点会自动把模型下载到 `ComfyUI\models\qwen-tts\Qwen3-TTS-12Hz-1.7B-VoiceDesign\`；
-3. 记住这个目录路径，配置时填进去即可。
-
-**方式 B：直接下载模型文件（不装 ComfyUI）**
-
-从 HuggingFace 下载该模型的权重（任选一个来源，下载成一个目录）：
-
-- <https://huggingface.co/cmp-nct/Qwen3-TTS-12Hz-1.7B-VoiceDesign>
-- <https://huggingface.co/onnx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign>
-- <https://huggingface.co/justmaier/Qwen3-TTS-12Hz-1.7B-VoiceDesign-GGUF>（量化版，更小）
-
-命令行方式（示例，仓库名换成你实际下载的那个）：
+**推荐用 ModelScope 下载**（国内快，先装 modelscope）：
 
 ```powershell
-huggingface-cli download cmp-nct/Qwen3-TTS-12Hz-1.7B-VoiceDesign --local-dir C:\models\Qwen3-TTS-12Hz-1.7B-VoiceDesign
+pip install modelscope
+modelscope download --model Qwen/Qwen3-TTS-12Hz-1.7B-Base --local_dir ./Qwen3-TTS-12Hz-1.7B-Base
 ```
 
-> 不管哪种方式，**最终你要得到一个"模型文件夹"的路径**（比如 `C:\models\Qwen3-TTS-12Hz-1.7B-VoiceDesign`），配置时填进去。
+> 在**项目根目录**执行上面命令，模型会下载到 `项目根\Qwen3-TTS-12Hz-1.7B-Base\`。
+
+**文件夹叫什么名字无所谓**（叫 Base、VoiceDesign、或任何名字都行），只要里面装的是 Base 的权重文件即可——配置文件认的是**目录路径**，不认名字。
 
 ## 四、准备参考音频（决定音色）
 
@@ -226,8 +215,8 @@ copy bridge\bridge-config.example.json bridge\bridge-config.json
 路径格式两种都行（Windows 下推荐正斜杠）：
 
 ```
-"C:/models/Qwen3-TTS-12Hz-1.7B-VoiceDesign"     ← 正斜杠
-"C:\\models\\Qwen3-TTS-12Hz-1.7B-VoiceDesign"    ← 双反斜杠
+"C:/你的QwenTTS模型目录/Qwen3-TTS-12Hz-1.7B-Base"     ← 正斜杠
+"C:\\你的QwenTTS模型目录\\Qwen3-TTS-12Hz-1.7B-Base"    ← 双反斜杠
 ```
 
 ### 建议改（1 处）
@@ -335,7 +324,7 @@ bridge\start-all.cmd
 
 8. **说话时女友窗不换视频** → `assets/task-videos/` 为空（说话动画自备，见第八部分）；没视频时会继续播空闲动画，属正常。
 
-9. **声音不像参考音频** → 检查 `ref_audio.wav` 是否清晰无杂音、`tts.ref_text` 是否与录音**逐字一致**（标点也要对）。
+9. **声音不像参考音频** → 检查 `ref_audio.wav` 是否清晰无杂音、`tts.ref_text` 是否与录音**逐字一致**（标点也要对）；并确认 TTS 模型是 **Base 版本**（`Qwen/Qwen3-TTS-12Hz-1.7B-Base`），VoiceDesign 版本不支持克隆。
 
 ---
 
