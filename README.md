@@ -44,56 +44,235 @@ dsh-voice-ai-girlfriend/
 └── docs/              # 开发日志等
 ```
 
-## 环境要求
+---
 
-| 项 | 要求 |
+# 从零开始安装（小白版）
+
+> 全程在 **Windows** 上操作。下面的命令默认在 **PowerShell** 里执行；
+> 除了标注"在项目文件夹里运行"的步骤，其余在哪里运行都行。
+
+## 一、前置准备（一次性装齐）
+
+### 1. 检查你的电脑
+
+| 检查项 | 要求 | 验证命令 |
+|---|---|---|
+| 系统 | Windows 10/11 64 位 | `winver` |
+| 显卡 | NVIDIA 独立显卡（显存建议 16GB 或以上） | `nvidia-smi`（能显示显卡信息即可） |
+| 磁盘 | 至少 30GB 剩余空间 | — |
+| 内存 | 建议 16GB 以上 | — |
+
+> `nvidia-smi` 不是 NVIDIA 显卡也能显示吗？不能——如果没有 NVIDIA 显卡或驱动没装好，会提示"不是内部或外部命令"或报错。**没有 NVIDIA 显卡就装不了本项目**（模型推理依赖 CUDA GPU）。
+
+### 2. 安装 Git
+
+用来克隆仓库。下载安装：<https://git-scm.com/download/win>，一路下一步。
+
+验证：`git --version` 能输出版本号即可。
+
+### 3. 安装 Python（3.10 或更高）
+
+下载安装：<https://www.python.org/downloads/windows/>
+
+⚠️ **安装时务必勾选 "Add Python to PATH"**，否则后面 `python` 命令会找不到。
+
+验证：打开新终端，`python --version` 能输出版本号即可。
+
+### 4. 更新 NVIDIA 驱动
+
+到 <https://www.nvidia.cn/drivers/> 下载最新驱动安装。驱动太旧会导致 CUDA 相关报错。
+
+> 本项目**不需要**单独安装 CUDA Toolkit——`pip` 装的 PyTorch 自带 CUDA 运行库，只要驱动够新就行。
+
+### 5. 安装 Node.js 和 pnpm（运行 DSH 用）
+
+- Node.js：下载安装 <https://nodejs.org/>（选 LTS 版本），一路下一步。
+- 验证：`node --version`
+- pnpm（Node.js 装完后，在终端执行）：
+
+```powershell
+npm install -g pnpm
+```
+
+- 验证：`pnpm --version`
+
+### 6. 准备 deepseek-harness（DSH）源码
+
+DSH 是开源项目，本项目是它的一个插件。**需要先有一份 DSH 源码树**（插件要装进它的源码里）：
+
+```powershell
+git clone https://github.com/deepseek-ai/deepseek-harness.git
+cd deepseek-harness
+pnpm install
+```
+
+> `pnpm install` 会装几十秒到几分钟。装完后这个文件夹先放着，后面"安装 DSH 语音插件"步骤要用。
+> 记住它的路径（比如 `C:\dev\deepseek-harness`），后面一键启动要用。
+
+### 7. 硬盘空间预估
+
+| 项目 | 大小 |
 |---|---|
-| 系统 | Windows 10/11（脚本是 .cmd） |
-| GPU | NVIDIA + CUDA（模型推理在 GPU，16GB 显存可流畅跑） |
-| Python | 3.10+ |
-| Node.js / pnpm | 运行 DSH 用 |
-| 模型 | whisper-large-v3（HF 自动下载 ~3GB）+ Qwen3-TTS-12Hz-1.7B-VoiceDesign（本地目录） |
+| 本项目代码 + 素材 | ~8MB |
+| Python 虚拟环境 + 依赖（含 PyTorch） | ~5-8GB |
+| whisper-large-v3 模型 | ~3GB |
+| Qwen3-TTS 模型 | ~2GB |
+| deepseek-harness + node_modules | ~2-4GB |
 
-## 快速开始
+## 二、安装本项目
 
-### 1. 克隆并创建 Python 环境
+### 1. 克隆仓库
 
-```bat
-git clone https://github.com/<你的用户名>/dsh-voice-ai-girlfriend.git
+```powershell
+git clone https://github.com/beiyege-01/dsh-voice-ai-girlfriend.git
 cd dsh-voice-ai-girlfriend
+```
+
+> 之后所有步骤都在这个文件夹（项目根目录）里进行。
+
+### 2. 创建 Python 虚拟环境
+
+```powershell
 python -m venv venv-speech
+```
+
+激活它：
+
+```powershell
 venv-speech\Scripts\activate
+```
+
+激活成功后，终端行首会出现 `(venv-speech)`。
+
+### 3. 安装依赖
+
+```powershell
 pip install -r bridge\requirements.txt
 ```
 
-### 2. 准备模型
+> 这一步会装 PyTorch、transformers、HuggingFace speech-to-speech 等，**体积大、耗时长**（几分钟到几十分钟），耐心等待。
+> 网络慢装不动？见文末"常见问题"第 1 条（换清华镜像）。
 
-- **STT**：`openai/whisper-large-v3` 会在首次 STT 调用时自动从 HuggingFace 下载（或已缓存），不用配。
-- **TTS**：需要一个 Qwen3-TTS-12Hz-1.7B-VoiceDesign 的本地模型目录（见第 4 步，把它填进配置）。
+## 三、准备模型（两个模型）
 
-### 3. 准备参考音频（音色来源）
+### 1. STT 模型：whisper-large-v3（自动下载，不用手动装）
 
-> 参考音频**不在仓库里**，请自备一段 10 秒左右、干净人声的录音（最好按下面的文本朗读），命名为 `ref_audio.wav` 放到**仓库根目录**：
+语音识别模型。**首次说话时自动从 HuggingFace 下载**（约 3GB），之后一直用缓存。想提前下载也可以：
+
+```powershell
+pip install -U "huggingface_hub[cli]"
+huggingface-cli download openai/whisper-large-v3
+```
+
+> 下载慢或失败？见"常见问题"第 2 条（HF 镜像）。
+
+### 2. TTS 模型：Qwen3-TTS-12Hz-1.7B-VoiceDesign（手动准备）
+
+音色克隆模型，需要**一个本地模型目录**（含权重文件）。两种获取方式任选：
+
+**方式 A：用 ComfyUI 自动下载（推荐给已有 ComfyUI 的人）**
+
+1. 装 ComfyUI（<https://github.com/comfyanonymous/ComfyUI>）和 ComfyUI-Qwen3-TTS 节点；
+2. 节点会自动把模型下载到 `ComfyUI\models\qwen-tts\Qwen3-TTS-12Hz-1.7B-VoiceDesign\`；
+3. 记住这个目录路径，配置时填进去即可。
+
+**方式 B：直接下载模型文件（不装 ComfyUI）**
+
+从 HuggingFace 下载该模型的权重（任选一个来源，下载成一个目录）：
+
+- <https://huggingface.co/cmp-nct/Qwen3-TTS-12Hz-1.7B-VoiceDesign>
+- <https://huggingface.co/onnx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign>
+- <https://huggingface.co/justmaier/Qwen3-TTS-12Hz-1.7B-VoiceDesign-GGUF>（量化版，更小）
+
+命令行方式（示例，仓库名换成你实际下载的那个）：
+
+```powershell
+huggingface-cli download cmp-nct/Qwen3-TTS-12Hz-1.7B-VoiceDesign --local-dir C:\models\Qwen3-TTS-12Hz-1.7B-VoiceDesign
+```
+
+> 不管哪种方式，**最终你要得到一个"模型文件夹"的路径**（比如 `C:\models\Qwen3-TTS-12Hz-1.7B-VoiceDesign`），配置时填进去。
+
+## 四、准备参考音频（决定音色）
+
+AI 女友的声音是**克隆自你的参考音频**的。请自备一段：
+
+- **时长**：10 秒左右（5~20 秒都行）
+- **内容**：干净人声、无背景音乐、无杂音，最好按下面的台词朗读（语速自然即可）：
 
 ```
 靠北啦，不想聊就不聊咯，摆什么臭架子哦，真以为自己很厉害，真以为自己很好看，我也是这么觉得啦，明天继续叫你好不好，笨蛋。
 ```
 
-然后在 `bridge-config.json` 里把 `tts.ref_text` 改成你实际朗读的文本（音色克隆质量依赖文本与录音一致）。
+- **文件**：命名为 `ref_audio.wav`，放到**项目根目录**（和 `bridge/` 文件夹同级）。
 
-### 4. 写配置
+> 也可以不用这段台词、录你自己的话——但配置里的 `tts.ref_text` 必须改成**你实际朗读的那句话**（音色克隆质量依赖文本与录音一致）。
 
-```bat
+## 五、填写配置（复制模板 + 改 1 个必改项）
+
+在**项目根目录**执行：
+
+```powershell
 copy bridge\bridge-config.example.json bridge\bridge-config.json
 ```
 
-编辑 `bridge\bridge-config.json`，**把占位路径换成你的真实路径**：
+用记事本打开 `bridge\bridge-config.json`：
 
-- `tts.model_name`：`C:/你的QwenTTS模型目录/Qwen3-TTS-12Hz-1.7B-VoiceDesign` → 你的模型目录（必改）
-- `tts.ref_text`：改成你参考音频实际朗读的文本（建议改）
-- 其他（素材目录 `assets/`、参考音频 `ref_audio.wav`）基于仓库根自动解析，一般不用动
+### 必须改（1 处）
 
-### 5. 准备说话动画（可选）
+| 位置 | 改成什么 |
+|---|---|
+| `tts.model_name` | 你 TTS 模型的**真实目录路径**（第三部分的模型文件夹） |
+
+路径格式两种都行（Windows 下推荐正斜杠）：
+
+```
+"C:/models/Qwen3-TTS-12Hz-1.7B-VoiceDesign"     ← 正斜杠
+"C:\\models\\Qwen3-TTS-12Hz-1.7B-VoiceDesign"    ← 双反斜杠
+```
+
+### 建议改（1 处）
+
+| 位置 | 改成什么 |
+|---|---|
+| `tts.ref_text` | 你参考音频实际朗读的文本（见第四部分） |
+
+### 不用动（已自动处理）
+
+| 配置 | 说明 |
+|---|---|
+| `media.bg_images_dir` / `task_videos_dir` | 相对路径，基于项目根自动解析 |
+| `tts.ref_audio` | 默认读取项目根的 `ref_audio.wav` |
+| `stt.*` | whisper 配置，默认即可 |
+
+## 六、先验证桥接（强烈建议）
+
+启动桥接：
+
+```powershell
+bridge\start-bridge.cmd
+```
+
+会弹出一个最小化的终端窗口，等 1-2 秒后，浏览器打开：
+
+```
+http://127.0.0.1:8765/api/health
+```
+
+看到 `{"status":"ok", ...}` 就说明桥接起来了（此时模型还没加载，等首次调用才会加载）。
+
+更完整的测试（**另开一个终端**，在项目根目录、venv 激活状态下）：
+
+```powershell
+venv-speech\Scripts\python.exe bridge\smoke_tts.py --text "你好，我是小雅。"
+```
+
+结束后项目根目录会生成 `tts_out.wav`，播放它——**能听到克隆音色的声音，说明 TTS 链路通了**。
+
+## 七、安装 DSH 语音插件
+
+桥接只是"声音的服务"，对话界面和麦克风按钮在 DSH 里，需要装插件。按 [`dsh-plugin/README.md`](dsh-plugin/README.md) 的步骤操作（把 `dsh-plugin\` 整个复制进你的 deepseek-harness 源码树，注册三处、构建、重启）。
+
+## 八、准备说话动画（可选）
 
 模型回复时女友窗播放的说话视频**不随仓库分发**，两种方式任选（详见 [`assets/task-videos/README.md`](assets/task-videos/README.md)）：
 
@@ -102,40 +281,64 @@ copy bridge\bridge-config.example.json bridge\bridge-config.json
 
 > 不装也不影响使用：说话时女友窗会继续播空闲动画。
 
-### 6. 启动
+## 九、启动
 
-**只起桥接**（先验证语音链路）：
+**只起桥接**（想先单独验证语音）：
 
-```bat
+```powershell
 bridge\start-bridge.cmd
 ```
 
 **一键全套**（桥接 + DSH Web + 浏览器）：
 
-```bat
-set DSH_HARNESS=C:\path\to\deepseek-harness   &  rem 指向 DSH 源码树
+```powershell
+set DSH_HARNESS=C:\dev\deepseek-harness
 bridge\start-all.cmd
 ```
 
-### 6. 安装 DSH 语音插件
+> `DSH_HARNESS` 指向你第一步准备的那份 DSH 源码树（第六部分安装过插件的那个）。
 
-DSH 插件运行在 DSH 框架内，不能独立运行。按 [`dsh-plugin/README.md`](dsh-plugin/README.md) 的步骤把它装进你的 deepseek-harness 源码树，重启 dsh web 后输入栏会出现麦克风按钮。
-
-### 7. 使用
+## 使用说明
 
 1. 点**麦克风**：开始连续聆听（每句自动识别发送；再点一下停止）
 2. 点**⚡**：插话（亮，默认）/ 排队（灭）——说话打断回复 vs 回复读完再自动接上
 3. 点**🎬**：显示/隐藏女友动画窗；窗口可拖宽、双击换边
 4. 点**🔊**：开/关语音朗读
 
-## 常见问题
+---
 
-- **第一次 TTS 很慢（10~60s）**：模型首次懒加载 + 预热，之后 TTFA 约 0.5s。
-- **STT 偶尔识别为空**：whisper 对超短语音（1 个 token）会判空丢弃，日志可见 `degenerate (1-token)`，属正常防护。
-- **桥接端口被占**：改 `bridge-config.json` 的 `port`，并同步改插件的 `s2s.voice.bridge`（localStorage）。
-- **女友窗不显示**：确认 `assets/` 目录存在、桥接已启动（窗口每 30s 拉一次素材列表）。
-- **说话时女友窗不换视频**：`assets/task-videos/` 为空（说话动画自备，见安装第 5 步）；没视频时会继续播空闲动画，属正常。
+# 常见问题
 
-## 许可
+1. **pip 装依赖太慢/超时** → 用清华镜像：
+
+   ```powershell
+   pip install -r bridge\requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+   ```
+
+2. **HuggingFace 下载模型慢/失败** → 用国内镜像：
+
+   ```powershell
+   set HF_ENDPOINT=https://hf-mirror.com
+   ```
+
+   设置后重新执行下载命令（`huggingface-cli download ...`）。
+
+3. **第一次 TTS 很慢（10~60s）** → 正常。模型首次懒加载 + 预热，之后每句约 0.5s 出音。
+
+4. **STT 偶尔识别为空** → whisper 对超短语音（1 个 token）会判空丢弃，日志可见 `degenerate (1-token)`，属正常防护。
+
+5. **桥接启动但模型加载失败** → 检查 `bridge-config.json` 里 `tts.model_name` 路径是否存在（路径拼写、盘符、斜杠方向），以及显卡驱动是否够新（见前置第 4 条）。
+
+6. **桥接端口被占** → 改 `bridge-config.json` 的 `port`，并同步改插件的 `s2s.voice.bridge`（浏览器 localStorage）。
+
+7. **女友窗不显示** → 确认 `assets/` 目录存在、桥接已启动（窗口每 30s 拉一次素材列表）。
+
+8. **说话时女友窗不换视频** → `assets/task-videos/` 为空（说话动画自备，见第八部分）；没视频时会继续播空闲动画，属正常。
+
+9. **声音不像参考音频** → 检查 `ref_audio.wav` 是否清晰无杂音、`tts.ref_text` 是否与录音**逐字一致**（标点也要对）。
+
+---
+
+# 许可
 
 Apache-2.0（详见 LICENSE）。复用 HuggingFace speech-to-speech（Apache-2.0）与 deepseek-harness 插件框架（MIT）；`assets/` 素材为 AI 生成，仅用于演示。
