@@ -1,0 +1,58 @@
+@echo off
+setlocal
+title DSH Voice Launcher
+rem One-click launcher for the full stack:
+rem   1. voice bridge (venv-speech python, port 8765, models lazy-load)
+rem   2. dsh web (the GUI at http://127.0.0.1:3080)  -- requires %DSH_HARNESS%
+rem   3. browser
+rem The bridge runs as its own minimized console (shows model load progress),
+rem independent of dsh web, so restarting the GUI does not kill it.
+rem
+rem Required environment before running:
+rem   DSH_HARNESS  = path to the deepseek-harness source tree
+rem                 (e.g. set DSH_HARNESS=C:\dev\deepseek-harness)
+rem If DSH_HARNESS is not set (or missing), only the bridge starts.
+
+set "REPO_ROOT=%~dp0.."
+set "BRIDGE_PY=%REPO_ROOT%\venv-speech\Scripts\python.exe"
+
+if not exist "%BRIDGE_PY%" (
+    echo [ERROR] venv-speech python not found: %BRIDGE_PY%
+    echo         Create it first, see README.md "安装" section.
+    pause
+    exit /b 1
+)
+
+rem --- start the voice bridge in its own minimized window ---
+cd /d "%REPO_ROOT%\bridge"
+echo Starting voice bridge on http://127.0.0.1:8765 ...
+start "voice-bridge" /min "%BRIDGE_PY%" -m uvicorn voice_bridge:app --host 127.0.0.1 --port 8765
+
+rem --- wait for the bridge health endpoint (up to 30s) ---
+echo Waiting for bridge health ...
+for /l %%i in (1,1,30) do (
+    >nul 2>&1 curl -s "http://127.0.0.1:8765/api/health" && goto :bridge_ok
+    timeout /t 1 /nobreak >nul
+)
+echo [WARN] bridge did not answer within 30s; continuing anyway.
+:bridge_ok
+
+rem --- start dsh web if the harness tree is configured ---
+if "%DSH_HARNESS%"=="" goto :no_harness
+if not exist "%DSH_HARNESS%\package.json" goto :no_harness
+echo Starting DSH Web from %DSH_HARNESS% ...
+cd /d "%DSH_HARNESS%"
+start /b pnpm dsh web
+timeout /t 3 /nobreak >nul
+start http://127.0.0.1:3080
+goto :done
+
+:no_harness
+echo.
+echo [NOTE] %DSH_HARNESS% is not set or missing, so DSH Web was NOT started.
+echo        Set the environment variable DSH_HARNESS to your deepseek-harness
+echo        source tree and re-run this script to launch the GUI too.
+
+:done
+echo All services started. This window can be closed.
+pause

@@ -1,0 +1,17 @@
+Apache License
+Version 2.0, January 2004
+http://www.apache.org/licenses/
+
+This project bundles and adapts code from:
+
+- HuggingFace speech-to-speech (https://github.com/huggingface/speech-to-speech),
+  Apache-2.0 — the STT/TTS handlers reused by bridge/voice_bridge.py.
+- deepseek-harness client plugin scaffold
+  (https://github.com/deepseek-ai/deepseek-harness), MIT — the DSH client
+  plugin structure in dsh-plugin/.
+
+The AI-generated media under assets/ (bg-images, task-videos) comes from the
+hf-realtime-voice demo workspace and is provided for demonstration only; check
+its origin before redistributing commercially.
+
+Full license text: https://www.apache.org/licenses/LICENSE-2.0

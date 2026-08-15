@@ -1,0 +1,35 @@
+.mic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  transition: color 0.2s ease, background 0.2s ease;
+}
+
+.mic:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* Capturing: red pulse. */
+.mic.listening {
+  color: var(--dsw-alias-state-error-primary);
+  animation: mic-pulse 1.2s ease-in-out infinite;
+}
+
+/* Transcribing: business accent, steady. */
+.mic.transcribing {
+  color: var(--dsw-alias-state-business-primary);
+}
+
+@keyframes mic-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}

@@ -1,0 +1,74 @@
+.companion {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  width: 55vw;
+  z-index: 40;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  opacity: 1;
+  transition: opacity 0.6s ease;
+  -webkit-mask-image: linear-gradient(to right,
+    transparent 0%,
+    rgba(10, 11, 16, 0.16) 18%,
+    rgba(10, 11, 16, 0.36) 38%,
+    rgba(10, 11, 16, 0.66) 60%,
+    rgba(10, 11, 16, 0.95) 100%);
+  mask-image: linear-gradient(to right,
+    transparent 0%,
+    rgba(10, 11, 16, 0.16) 18%,
+    rgba(10, 11, 16, 0.36) 38%,
+    rgba(10, 11, 16, 0.66) 60%,
+    rgba(10, 11, 16, 0.95) 100%);
+}
+
+.video.hidden {
+  opacity: 0;
+}
+
+/* Left-edge column: the inner (right) edge fades instead. */
+.companion.left .video {
+  -webkit-mask-image: linear-gradient(to left,
+    transparent 0%,
+    rgba(10, 11, 16, 0.16) 18%,
+    rgba(10, 11, 16, 0.36) 38%,
+    rgba(10, 11, 16, 0.66) 60%,
+    rgba(10, 11, 16, 0.95) 100%);
+  mask-image: linear-gradient(to left,
+    transparent 0%,
+    rgba(10, 11, 16, 0.16) 18%,
+    rgba(10, 11, 16, 0.36) 38%,
+    rgba(10, 11, 16, 0.66) 60%,
+    rgba(10, 11, 16, 0.95) 100%);
+}
+
+/* Inner-edge drag handle: the only interactive part of the overlay. */
+.handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 8px;
+  cursor: col-resize;
+  pointer-events: auto;
+  background: transparent;
+  transition: background 0.2s ease;
+}
+
+.companion.left .handle {
+  left: auto;
+  right: 0;
+}
+
+.handle:hover {
+  background: rgba(255, 255, 255, 0.12);
+}

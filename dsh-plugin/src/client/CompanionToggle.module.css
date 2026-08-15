@@ -1,0 +1,32 @@
+.displayOn,
+.displayOff {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  transition: color 0.2s ease, background 0.2s ease;
+}
+
+.displayOn {
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.displayOn:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.displayOff {
+  color: var(--dsw-alias-label-dimmed);
+  opacity: 0.6;
+}
+
+.displayOff:hover {
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}

@@ -1,0 +1,28 @@
+# ---- Python ----
+__pycache__/
+*.pyc
+venv*/
+.venv/
+*.egg-info/
+
+# ---- Node / DSH plugin build output ----
+node_modules/
+dist/
+lib/
+*.tsbuildinfo
+
+# ---- Local config with personal paths (never commit yours) ----
+bridge/bridge-config.json
+
+# ---- Reference audio: users bring their own (not committed) ----
+ref_audio.wav
+ref_audio.*
+
+# ---- Scratch / temp artifacts ----
+*.bak
+tts_out.wav
+*.local.json
+
+# ---- OS ----
+.DS_Store
+Thumbs.db

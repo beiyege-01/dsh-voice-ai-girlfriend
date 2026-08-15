@@ -1,0 +1,37 @@
+{
+  "host": "127.0.0.1",
+  "port": 8765,
+  "cors_origins": ["http://127.0.0.1:3080", "http://localhost:3080"],
+  "stt": {
+    "model_name": "openai/whisper-large-v3",
+    "device": "cuda",
+    "torch_dtype": "float16",
+    "compile_mode": null,
+    "language": "zh",
+    "gen_kwargs": {
+      "max_new_tokens": 128,
+      "num_beams": 1,
+      "return_timestamps": false,
+      "task": "transcribe"
+    }
+  },
+  "tts": {
+    "model_name": "C:/你的QwenTTS模型目录/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+    "device": "cuda",
+    "dtype": "auto",
+    "attn_implementation": "eager",
+    "ref_audio": "ref_audio.wav",
+    "ref_text": "你的参考音频对应的文字（录音时照着读的台词）",
+    "language": "zh",
+    "speaker": null,
+    "xvec_only": false,
+    "parity_mode": false,
+    "non_streaming_mode": true,
+    "max_new_tokens": 1536,
+    "blocksize": 512
+  },
+  "media": {
+    "bg_images_dir": "assets/bg-images",
+    "task_videos_dir": "assets/task-videos"
+  }
+}
