@@ -6,9 +6,9 @@ rem + WebUI on 6099, and connects its WebSocket client to the voice bridge).
 rem
 rem NOTE: this closes ALL running QQ processes first (NapCat injection needs
 rem the QQ client stopped). If your main QQ is logged in on this PC, it will
-rem be signed out here ? use the phone QQ for your main account.
+rem be signed out here — use the phone QQ for your main account.
 
-if "%NAPCAT_DIR%"=="" set "NAPCAT_DIR=D:\QQ\NapCat\napcat"
+set "NAPCAT_DIR=D:\QQ\NapCat\napcat"
 set "BRIDGE=http://127.0.0.1:8765"
 
 if not exist "%NAPCAT_DIR%\launcher-win10-user.bat" (
@@ -43,5 +43,6 @@ echo       WebUI: http://127.0.0.1:6099
 :done
 echo.
 echo Done. This window can be closed.
-pause
-
+rem No pause here: this script is launched in its own window by
+rem start-dsh-voice.cmd (which must NOT block waiting for a keypress).
+if /I "%~1"=="-p" pause

@@ -47,7 +47,7 @@ rem --- start NapCatQQ (QQ two-way bridge). SKIP with: start-all.cmd /nq ---
 if /I "%~1"=="nq" goto :skip_napcat
 echo.
 echo [NapCat] Starting QQ bridge (closes running QQ, injects the bot account)...
-call "%~dp0start-napcat.cmd" >nul 2>&1
+start "napcat-bridge" /min cmd /c ""%~dp0start-napcat.cmd""
 :skip_napcat
 
 rem --- start dsh web if the harness tree is configured ---
@@ -69,4 +69,5 @@ echo        source tree and re-run this script to launch the GUI too.
 :done
 echo All services started. This window can be closed.
 pause
+
 

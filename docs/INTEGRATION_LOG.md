@@ -295,3 +295,14 @@
 - **单独启动**:start-napcat.cmd(等 3000 就绪,失败提示去 WebUI 6099 检查 HTTP 服务)。
 - **顺序要点**:桥接先起(8765 空闲)→ NapCat 起来后其 WebSocket 客户端自动连桥接 /api/qq/onebot(配置持久化)→ QQ 双向自动恢复,无需手动重连。
 - release 已同步(start-napcat.cmd NAPCAT_DIR 可配置 + start-all.cmd 集成 + README 启动顺序说明)。
+
+## 修复:一键启动卡住,DSH web 3080 起不来(2026-08-16)
+
+- **现象**:用户重启后用 start-dsh-voice.cmd,桥接/NapCat 窗口都起来,但 3080 一直起不来。
+- **根因**:start-napcat.cmd 末尾有 pause,而 start-dsh-voice.cmd 用 call 调用它 → 主脚本阻塞在 NapCat 的 pause 上等按键,后面的 pnpm dsh web 永远执行不到。
+- **修复**:
+  - start-napcat.cmd:去掉阻塞的 pause(改为 -p 参数可选)。
+  - start-dsh-voice.cmd / start-all.cmd:用 start "napcat-bridge" /min cmd /c start-napcat.cmd 在**独立窗口**启动 NapCat,主脚本不等待,立即继续起 DSH web。
+- **教训**:子脚本的 pause 被 call 时会把父脚本一起卡住;多服务启动脚本里,可阻塞的子流程必须独立窗口启动。
+- **正确用法**:双击 D:\speech-to-speech\start-dsh-voice.cmd(桥接+NapCat 独立窗+DSH web+浏览器);
+q 跳过 NapCat。
