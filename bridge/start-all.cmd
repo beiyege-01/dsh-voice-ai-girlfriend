@@ -56,13 +56,17 @@ if not exist "%DSH_HARNESS%\package.json" goto :no_harness
 echo Starting DSH Web from %DSH_HARNESS% ...
 cd /d "%DSH_HARNESS%"
 rem Skip if 3080 is already serving (e.g. a manual pnpm dsh web is running)
->nul 2>&1 curl -s -m 2 "http://127.0.0.1:3080" && (
-    echo [DSH] 3080 already running - skipping dsh web start.
-    goto :web_up
-)
-start /b pnpm dsh web
+>nul 2>&1 curl -s -m 2 "http://127.0.0.1:3080" && goto :web_up
+rem start in its OWN window so closing this launcher never kills dsh web
+start "dsh-web" /min cmd /c "cd /d ""%DSH_HARNESS%"" && set OPENAI_BASE_URL=https://apihub.agnes-ai.com/v1 && set OPENAI_API_KEY= && pnpm dsh web"
 :web_up
-timeout /t 3 /nobreak >nul
+echo Waiting for DSH Web :3080 ...
+for /l %%i in (1,1,60) do (
+    >nul 2>&1 curl -s -m 2 "http://127.0.0.1:3080" && goto :web_ready
+    timeout /t 1 /nobreak >nul
+)
+echo [WARN] 3080 did not answer within 60s; opening browser anyway.
+:web_ready
 start http://127.0.0.1:3080
 goto :done
 

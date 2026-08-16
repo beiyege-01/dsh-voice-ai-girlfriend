@@ -314,3 +314,14 @@ q 跳过 NapCat。
 - **修复**:dsh web 段先 curl 检测 3080,已监听则跳过启动(直接 goto web_up 开浏览器)。
 - **验证**:模拟脚本 dsh web 段(3080 被占时)复现 EADDRINUSE 错误确认根因;修复后已运行 3080 时脚本会提示"3080 already running - skipping"。
 - release start-all.cmd 同步修复。
+
+## 修复(真正根因):start /b 启动的 dsh web 被主窗口连带杀掉(2026-08-16)
+
+- **现象**:一键脚本跑完,桥接/NapCat 独立窗口都在,唯独 3080 起不来。
+- **根因**(逐段审查 start-dsh-voice.cmd 发现):dsh web 用 start /b pnpm dsh web 启动 —— start /b 把 dsh web 附着在【主脚本的控制台】上。用户关闭一键脚本窗口(或 Ctrl+C/pause 时关窗),Windows 控制台关闭会**终止其所有子进程** → dsh web 被杀 → 3080 永远起不来。而 bridge/NapCat 用独立窗口 start,不受影响 → 正好匹配用户观察(三个窗口都在,唯独 3080 没起)。
+- **修复**:
+  - dsh web 改为独立窗口启动:start "dsh-web" /min cmd /c "cd /d HARNESS && set env && pnpm dsh web" —— 关主脚本窗口不影响 dsh web。
+  - 增加 3080 就绪等待(60s)再开浏览器。
+  - 保留 3080 已运行则跳过逻辑。
+- release start-all.cmd 同步。
+- **遗留**:用户当前手动 pnpm dsh web 跑着 3080(正常);下次重启用一键脚本验证。
