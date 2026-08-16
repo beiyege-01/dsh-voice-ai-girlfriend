@@ -155,16 +155,18 @@ pip install -r bridge\requirements.txt
 
 ## 三、准备模型（两个模型）
 
-### 1. STT 模型：whisper-large-v3（自动下载，不用手动装）
+### 1. STT 模型：FunASR Paraformer 中文模型（自动下载，不用手动装）
 
-语音识别模型。**首次说话时自动从 HuggingFace 下载**（约 3GB），之后一直用缓存。想提前下载也可以：
+语音识别用**阿里 FunASR 中文 ASR**（Paraformer-large，专为中文设计，同音字/口音识别准确率远高于 whisper）。**首次说话时自动从 ModelScope 下载**（约 1GB），之后一直用缓存。想提前下载也可以：
 
 ```powershell
-pip install -U "huggingface_hub[cli]"
-huggingface-cli download openai/whisper-large-v3
+pip install modelscope
+python -c "from modelscope import snapshot_download; snapshot_download('iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch')"
 ```
 
-> 下载慢或失败？见"常见问题"第 2 条（HF 镜像）。
+> 想换回 whisper（如 `openai/whisper-large-v3` 或 `-turbo`）？把 `bridge-config.json` 里 `stt.backend` 改为 `"whisper"` 并把 `model_name` 换成 whisper 模型 id 即可（桥接双后端都支持）。
+
+> 下载慢或失败？见"常见问题"第 2 条（HF/ModelScope 镜像）。
 
 ### 2. TTS 模型：Qwen3-TTS-12Hz-1.7B-Base（声音克隆模型，手动准备）
 

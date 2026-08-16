@@ -156,13 +156,19 @@ class ModelManager:
 
 
 def _load_stt_handler():
-    """Instantiate WhisperSTTHandler with bridge-config.json['stt'] settings."""
+    """Instantiate the configured STT backend: 'funasr' (Chinese ASR, default
+    when configured) or the original WhisperSTTHandler fallback."""
+    backend = CONFIG["stt"].get("backend", "whisper")
+    if backend == "funasr":
+        return _load_funasr_handler()
+
     from queue import Empty, Queue
     from threading import Event
 
     from speech_to_speech.STT.whisper_stt_handler import WhisperSTTHandler
 
     cfg = dict(CONFIG["stt"])
+    cfg.pop("backend", None)
     handler = WhisperSTTHandler(
         Event(),
         queue_in=Queue(),
@@ -171,6 +177,28 @@ def _load_stt_handler():
         setup_kwargs=cfg,
     )
     return handler
+
+
+def _load_funasr_handler():
+    """Lazily load the FunASR Chinese ASR model (Paraformer-large, 16k).
+
+    Returns the funasr AutoModel; transcribing goes through _transcribe_funasr.
+    The FunASR AutoModel caches its own singleton, so repeated loads are cheap.
+    """
+    from funasr import AutoModel
+
+    model_name = CONFIG["stt"].get(
+        "model_name",
+        "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+    )
+    device = CONFIG["stt"].get("device", "cuda")
+    dtype = CONFIG["stt"].get("torch_dtype", "float16")
+    return AutoModel(
+        model=model_name,
+        trust_remote_code=True,
+        device=device,
+        dtype=dtype,
+    )
 
 
 def _load_tts_handler():
@@ -215,6 +243,9 @@ def decode_audio(body: bytes, content_type: str) -> np.ndarray:
 
 
 def _transcribe(handler, audio: np.ndarray) -> tuple[str, str | None]:
+    if CONFIG["stt"].get("backend", "whisper") == "funasr":
+        return _transcribe_funasr(handler, audio)
+
     from speech_to_speech.pipeline.messages import VADAudio
 
     try:
@@ -227,6 +258,19 @@ def _transcribe(handler, audio: np.ndarray) -> tuple[str, str | None]:
         logger.warning("STT: whisper returned a degenerate (1-token) generation; treating as empty")
         return "", None
     return transcription.text, transcription.language_code
+
+
+def _transcribe_funasr(model, audio: np.ndarray) -> tuple[str, str | None]:
+    """Transcribe 16 kHz mono float32 audio with the FunASR model."""
+    try:
+        result = model.generate(input=audio, cache={})
+        text = (result[0].get("text") or "").strip() if result else ""
+        if not text:
+            logger.warning("STT: funasr returned empty result; treating as empty")
+        return text, "zh"
+    except Exception:  # noqa: BLE001 - surfaced to the client
+        logger.exception("STT: funasr transcribe failed")
+        return "", None
 
 
 models = ModelManager()
