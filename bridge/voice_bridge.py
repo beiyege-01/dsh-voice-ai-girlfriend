@@ -426,21 +426,33 @@ class VADSession:
         )
 
     def feed(self, pcm16: bytes) -> list[dict]:
-        """Feed one 16 kHz PCM16 chunk; returns outbound JSON events.
+        """Feed one 16 kHz PCM16 chunk (any size); returns outbound JSON events.
 
+        Silero VAD requires fixed 512-sample windows at 16 kHz, so arbitrary
+        client chunk sizes are split (tail window zero-padded). The handler
+        also clears its should_listen flag after each finished utterance —
+        re-arm it every frame so barge-in keeps listening across utterances.
         VADAudio outputs (final utterances) are intentionally ignored here —
         this endpoint only signals barge-in timing; the client keeps its own
         utterance capture for STT.
         """
-        for _ in self.vad.process(pcm16):
-            pass
+        import numpy as np
+
         out: list[dict] = []
-        while not self._events.empty():
-            ev = self._events.get_nowait()
-            if type(ev).__name__ == "SpeechStartedEvent":
-                out.append({"event": "speech_start"})
-            elif type(ev).__name__ == "SpeechStoppedEvent":
-                out.append({"event": "speech_end"})
+        data = np.frombuffer(pcm16, dtype=np.int16)
+        for start in range(0, len(data), 512):
+            window = data[start:start + 512]
+            if len(window) < 512:
+                window = np.concatenate([window, np.zeros(512 - len(window), dtype=np.int16)])
+            self.vad.should_listen.set()
+            for _ in self.vad.process(window.tobytes()):
+                pass
+            while not self._events.empty():
+                ev = self._events.get_nowait()
+                if type(ev).__name__ == "SpeechStartedEvent":
+                    out.append({"event": "speech_start"})
+                elif type(ev).__name__ == "SpeechStoppedEvent":
+                    out.append({"event": "speech_end"})
         return out
 
 
