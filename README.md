@@ -65,6 +65,17 @@ dsh-voice-ai-girlfriend/
 
 > `nvidia-smi` 不是 NVIDIA 显卡也能显示吗？不能——如果没有 NVIDIA 显卡或驱动没装好，会提示"不是内部或外部命令"或报错。**没有 NVIDIA 显卡就装不了本项目**（模型推理依赖 CUDA GPU）。
 
+**显存占用**（运行时实测，约 8GB）：
+
+| 模型 | 显存占用 |
+|---|---|
+| Qwen3-TTS 1.7B（fp16） | ~3.7GB |
+| FunASR Paraformer-large（fp16） | ~1GB |
+| CUDA 上下文 / 激活 / 缓冲 | ~3GB 余量 |
+| **合计** | **~8.1GB（实测 `nvidia-smi` 8101 MiB）** |
+
+> 所以 16GB 显存可流畅运行（含浏览器、系统开销余量）；8GB 显存的卡会非常紧张，不推荐。
+
 ### 2. 安装 Git
 
 用来克隆仓库。下载安装：<https://git-scm.com/download/win>，一路下一步。
