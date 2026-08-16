@@ -198,9 +198,9 @@ export class MicRecorder {
     if (this.released || this.paused) return
 
     // Barge-in mode: stream to the bridge VAD (never accumulate). Without a
-    // VadStream (bridge without the endpoint), fall back to the RMS heuristics.
+    // connected VadStream (bridge without the endpoint), fall back to RMS.
     if (this.interruptMode) {
-      if (this.opts.vad === undefined) {
+      if (this.opts.vad === undefined || !this.opts.vad.available) {
         const threshold = this.opts.interruptThreshold ?? DEFAULT_INTERRUPT_THRESHOLD
         const now = performance.now()
         if (rms >= threshold) {

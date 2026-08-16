@@ -59,6 +59,13 @@ export class VadStream {
   private ws: WebSocket | null = null
   private buffered: ArrayBuffer[] = []
   private closed = false
+  private connected = false
+
+  /** Whether the VAD socket is actually connected. The recorder falls back to
+   *  RMS heuristics while this is false (e.g. an old bridge without /api/vad). */
+  get available(): boolean {
+    return this.connected
+  }
 
   /**
    * @param onSpeechStart - fired once when silero VAD hears speech.
@@ -72,6 +79,8 @@ export class VadStream {
     this.ws = ws
     ws.binaryType = 'arraybuffer'
     ws.onopen = () => {
+      if (this.ws !== ws) return
+      this.connected = true
       for (const chunk of this.buffered.splice(0)) {
         ws.send(chunk)
       }
@@ -86,6 +95,7 @@ export class VadStream {
     }
     ws.onclose = () => {
       if (this.ws === ws) this.ws = null
+      this.connected = false
     }
   }
 
