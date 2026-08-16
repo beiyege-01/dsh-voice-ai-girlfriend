@@ -185,3 +185,79 @@
   - 用户连说两句的中间偶发「短句没上屏」= whisper 1-token 退化结果被桥接判空丢弃(22:39:44/47 日志 degenerate (1-token)),属 STT 对超短语音的固有防护,非排队问题。
   - 排队 dock 的「插话发送」按钮仅回合运行中可点(空闲置灰,提示「仅运行中可插话发送」),空闲时排队句自动发送、无需手点 —— 已向用户解释,确认非卡住。
   - 用户确认按钮语义保持:⚡亮=插话,⚡灭=排队。
+
+## 修复:重启后历史回复被重新朗读(2026-08-16,已验收 ✅)
+
+- **现象**:重启电脑打开 DSH 后,历史会话的回复自动开始 TTS 朗读。
+- **根因**:reply-listener 的防重读 seed 在**第一次 effect 运行时**执行,把快照里已有节点标记为已读。但重启后会话快照是**异步加载**的 —— 首次 effect 跑在空快照上,seed 落空(seededRef 置 true 但没标记任何节点),随后历史节点加载进来全被当成新回复朗读。
+- **修复**:改用 **anchor 基线**(T6 思路 + 修正时序):
+  - 删掉一次性节点 seed(seededRef),改为 baselineRef:首次出现 **settled** 的 assistant 节点时,把基线设为当前最大 anchorSeq,skipUntilRef = baseline;
+  - 朗读只处理 anchor > baseline 的节点 → 历史(含翻页 loadOlder 加载的更旧内容)永不重读;
+  - running 节点不参与基线 → 新会话第一条回复、重启后立即说话的新回复照常朗读。
+- 构建:tsc 零错误;served bundle 54655 B。**刷新页面即生效**;已在朗读的历史会在刷新后停止(组件卸载时 speaker.stop())。
+- 已推送 release 副本(commit cdaa0aa,push 成功后补推完成)。
+- **验收通过(2026-08-16)**:用户二次刷新页面后测试 —— 历史不再自动朗读 ✓,新回复正常朗读 ✓。
+
+## 打断改造:服务端 silero VAD(2026-08-16,已验收 ✅)
+
+- **背景**:RMS 阈值打断反复误触发 —— TTS 播放期间环境音/音乐/回声被当成「人声」触发打断,随后累积成乱文(「谢谢观看」「響鐘」)。用户要求参考原项目 hf-realtime-voice 的打断/拾音实现。
+- **原项目机制**(已读源码确认):
+  - 拾音:前端麦克风 PCM16 16kHz 流式发服务端,服务端 **silero VAD**(VADHandler,神经网络)判定语音;
+  - min_speech_ms=384ms(短于 384ms 的语音片段当噪声丢弃)、_SHORT_SEGMENT_MIN_FRAGMENT_MS=100ms;
+  - 打断:VAD 检测到真人语音 → SpeechStartedEvent(interrupt_response)→ 服务端打断 TTS;播放期间麦克风照常流式发送(靠 VAD 区分人声/回声,不是暂停拾音)。
+- **我们实施(Plan A:silero VAD in bridge)**:
+  - 桥接加 WebSocket /api/vad:复用 speech_to_speech.VAD.vad_handler.VADHandler(thresh=0.6, min_speech_ms=384),客户端流式发 PCM16,真人语音 → {"event":"speech_start"};
+  - 客户端 VadStream(bridge.ts):打断期间把 chunk 发 VAD,收到 speech_start → onSpeechInterrupt(停 TTS+吞剩余);RMS 阈值(0.06+180ms 确认)保留为桥接无 VAD 端点时的回退;
+  - onChunk 在 interruptMode 时只发 VAD 不累积。
+- 构建:tsc 零错误;served bundle 58,006 B。**需要重启桥接**(/api/vad 是新端点,运行中的旧进程没有)。
+- release 副本已合并 VAD(commit d78928a)并推送;验证 release 桥接 import OK。
+- **验收通过(2026-08-16)**:
+  - 桥接 /api/vad 端到端验证:40ms chunk 流式喂入 + 真实人声 → speech_start 触发;静音不触发(512 帧修复后)。
+  - 用户实测:开口 → 故事朗读立即停止(VAD 打断生效);环境音不再触发打断;短杂音被 silero 丢弃(日志 VAD: discarding segment=158ms)。
+  - 语音误识别(「我过失了」等)属 whisper 模型问题,与打断逻辑无关。
+  - **追加修复**:打断后新回复被吞 bug —— skip 从「<= 最大 anchor」改为「精确 anchor」,只吞被打断的回复,新回复正常朗读(参考原项目 audio-playback clear 语义);用户实测打断后下一条回复正常朗读 ✅ (commit 06483e9)。
+
+## STT 升级:FunASR Paraformer 中文 ASR(2026-08-16,已验收 ✅)
+
+- **背景**:whisper 家族(含 turbo)对用户口音的中文同音字识别差(尽/静、目/木、楼/牛、庵/安、钱/前 → 准确率约 86%);beam 提高又太慢(large-v3 beam3 9.5s)。
+- **方案**:桥接新增 stt.backend 双后端(funasr | whisper),FunASR Paraformer-large 中文模型(ModelScope 下载 ~1GB,iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch);/api/stt 接口不变,前端零改动。
+- **安装**:pip install funasr modelscope(清华镜像);模型 snapshot_download 进 modelscope 缓存。
+- **实测(用户口音,三句古诗词)**:
+  - whisper-turbo:尽→静、目→木、楼→牛、庵→安、钱→前,5 处同音错(86%)
+  - FunASR:五处同音字**全部纠正**;仅「仙→鲜」「摘→栽」2 处音近错(~93%)
+- **保留 whisper 回退**:config 里 backend 改 whisper 即回退(适合要 whisper 的场景)。
+- **响应时间实测(direct benchmark,排除脚本开销)**:2s 音频 642ms(含首次 CUDA graph 捕获)/ 5s 音频 151ms / 14.2s 音频 155ms,RTF 0.003 —— 秒回级,浏览器无感知延迟。之前 smoke 脚本测出的 12.5s 是脚本自身开销(soundfile/scipy 导入+重采样+HTTP),非推理时间。
+- release 已推送(commit a547cf7);README/requirements(funasr/modelscope/scipy)/example config 同步;本地 D:\speech-to-speech\requirements.txt 已建(完整依赖)。
+- 注意:本地 start-bridge.cmd / start-dsh-voice.cmd 无需改动(uvicorn 启动方式不变;FunASR 是 bridge-config backend 切换)。
+
+## 模型本地化:models/ 目录(2026-08-16)
+
+- **需求**:把 FunASR + silero VAD 模型拷到 D:\speech-to-speech\models\ 独立存储,桥接从本地加载(不依赖 ModelScope/HF/torch.hub 缓存),并更新启动脚本。
+- **models/ 结构**:
+  - funasr/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch/ (850MB,从 modelscope 缓存拷贝)
+  - silero-vad/silero_vad_v4.jit (1.4MB,从 silero-vad v4.0 tag 的 files/silero_vad.jit 获取;无 annotator,稳定)
+  - silero-vad/silero_vad.jit / *_16k_op15.onnx / *_half.onnx (v5 缓存拷贝,备用)
+- **桥接改造**:
+  - VADSession 改用本地 v4 jit + VADIterator(不再用 speech_to_speech.VADHandler 的 torch.hub.load);feed 改为**缓冲累积**切 512 帧(不再补零 —— 补零会破坏音频连续性导致 speech_start 不触发)。
+  - FunASR 后端 model_name 指向本地路径(bridge-config.json),AutoModel(model=本地目录) 加载。
+- **排障记录**:
+  - 测试脚本漏了立体声降混 → (512,2) 喂入触发 silero "too short"/annotator 错 —— 非模型问题,降混后 v4/v5 jit 均正常。
+  - torch 2.14 dev + silero v5 jit 的 annotator 在新 torch 下行为不稳(实测 17:53 正常、18:0x 报错),故改 v4 稳定版。
+  - silero onnx 各版本(op15/half)输入签名与 stft pad 要求不匹配,放弃。
+- **启动脚本**:start-bridge.cmd / start-dsh-voice.cmd 加 models 存在性检查提示。
+- **验证**:VAD WS 端到端 speech_start=7 speech_end=8(本地 v4);STT 本地 funasr 识别正常(含加载 6.4s,热后 150ms)。
+- release:bridge/voice_bridge.py 合并(简化配置 + funasr 路径解析 + 本地 VAD),example config models/ 相对路径,.gitignore 加 models/,启动脚本加检查,README 模型目录说明。
+
+## 前端噪声门 NoiseGate(2026-08-16,已验收 ✅)
+
+- **背景**:用户贴音响时 TTS 声音大量拾入产生乱文;放风扇旁也会偶发误识别(「这是什么」「我爸的手机壳」)。原项目有前端噪声门,我们没启用。
+- **发现**:worklet(mic-capture.ts)其实**早已 verbatim 携带原项目的 gate 实现**(attack 5ms/hold 250ms/release 80ms 包络),但主线程从未发送 {kind:'gate'} 启动消息 → gate 一直关闭。
+- **改动**:
+  - recorder.ts:MicRecorderOptions 加 noiseGateDb;start() 里 node.port.postMessage({kind:'gate', enabled:true, thresholdDb}) 启用。
+  - MicButton.tsx:noiseGateDb **-45 → -35**(实测 -45 挡不住桌面风扇声(~-40~-30dB),收紧后挡中响度环境音;正常说话 ~-26~-10dB 不受影响)。
+- **验证**:
+  - 风扇旁不说话:噪声门生效时不冒乱文(「没有没有没有」= 干净);
+  - -45dB 时风扇声仍穿透一次(识别成「这是什么」)→ 收紧 -35dB;
+  - -35dB 后正常说话识别不受影响(「我爸的手机壳」准确)。
+- **边界**:响亮持续环境音(风扇近距/家人说话/电视)任何 ASR 都挡不住,属物理限制;识别本身(清晰说话)准确。
+- release 已推送(commit 8ce803a)。
