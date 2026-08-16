@@ -12,7 +12,7 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pulls ui-conversation's SlotMap merge for PropsRuntime resolution.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { stt } from './bridge.ts'
+import { stt, VadStream } from './bridge.ts'
 import type { VoiceInjected } from './contract.ts'
 import { MicRecorder } from './voice/recorder.ts'
 import css from './MicButton.module.css'
@@ -106,6 +106,9 @@ export const MicButton = memo(function MicButton({ t, sendText, speaker, interru
       minSilenceMs: 1800,
       maxUtteranceMs: 30000,
       rmsThreshold: 0.01,
+      // Barge-in: bridge silero VAD (real human voice only). RMS values are
+      // the fallback used when the bridge lacks the /api/vad endpoint.
+      vad: new VadStream(),
       interruptThreshold: 0.06,
       interruptHoldMs: 250,
       interruptConfirmMs: 180,

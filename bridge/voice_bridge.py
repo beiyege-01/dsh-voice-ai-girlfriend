@@ -28,7 +28,7 @@ import threading
 from pathlib import Path
 
 import numpy as np
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -385,3 +385,84 @@ if BG_IMAGES_DIR.is_dir():
     app.mount("/media/bg-images", StaticFiles(directory=str(BG_IMAGES_DIR)), name="media-bg")
 if TASK_VIDEOS_DIR.is_dir():
     app.mount("/media/task-videos", StaticFiles(directory=str(TASK_VIDEOS_DIR)), name="media-task")
+
+# ── Silero VAD endpoint (barge-in detection) ──────────────────────────────
+#
+# The original speech-to-speech project runs VAD on the SERVER with silero-vad,
+# a neural network trained to tell a real human voice apart from noise / music /
+# TTS echo. Our browser-side RMS threshold cannot do that, which is why ambient
+# sounds kept tripping the barge-in and got STT'd into phantom messages.
+#
+# /api/vad is a WebSocket: while a reply is playing the client streams its mic
+# PCM16 chunks here; the server feeds them to the same VADHandler the original
+# project uses and replies {"event":"speech_start"} only when a real voice is
+# heard — the client then interrupts the reply. Chunks are never stored.
+
+class VADSession:
+    """One silero VAD session per WebSocket connection (lazy import)."""
+
+    def __init__(self) -> None:
+        from queue import Queue
+        from threading import Event
+
+        from speech_to_speech.VAD.vad_handler import VADHandler
+
+        self._events: Queue = Queue()
+        should_listen = Event()
+        should_listen.set()
+        self.vad = VADHandler(
+            Event(),  # base stop event (unused here)
+            queue_in=Queue(),
+            queue_out=Queue(),
+            setup_args=(should_listen,),
+            setup_kwargs={
+                "text_output_queue": self._events,
+                "sample_rate": 16000,
+                "thresh": 0.6,
+                "min_silence_ms": 64,
+                "min_speech_ms": 384,
+                "max_speech_ms": 30000,
+            },
+        )
+
+    def feed(self, pcm16: bytes) -> list[dict]:
+        """Feed one 16 kHz PCM16 chunk; returns outbound JSON events.
+
+        VADAudio outputs (final utterances) are intentionally ignored here —
+        this endpoint only signals barge-in timing; the client keeps its own
+        utterance capture for STT.
+        """
+        for _ in self.vad.process(pcm16):
+            pass
+        out: list[dict] = []
+        while not self._events.empty():
+            ev = self._events.get_nowait()
+            if type(ev).__name__ == "SpeechStartedEvent":
+                out.append({"event": "speech_start"})
+            elif type(ev).__name__ == "SpeechStoppedEvent":
+                out.append({"event": "speech_end"})
+        return out
+
+
+@app.websocket("/api/vad")
+async def vad_endpoint(ws: WebSocket) -> None:
+    """Streaming barge-in VAD. Client pushes raw 16 kHz mono PCM16 (any chunk
+    size, ~40ms typical); server replies speech_start/speech_end JSON when
+    silero VAD hears human speech."""
+    await ws.accept()
+    session = VADSession()
+    try:
+        while True:
+            data = await ws.receive_bytes()
+            if not data:
+                continue
+            for msg in session.feed(data):
+                await ws.send_json(msg)
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("VAD websocket error")
+        try:
+            await ws.close()
+        except Exception:
+            pass

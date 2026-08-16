@@ -47,3 +47,67 @@ export async function tts(text: string, signal?: AbortSignal): Promise<ArrayBuff
   }
   return resp.arrayBuffer()
 }
+
+/**
+ * Streaming silero VAD client for barge-in detection (the server-side VAD of
+ * the original speech-to-speech project). While a reply is playing the mic
+ * recorder pushes PCM16 chunks here; the bridge replies
+ * `{ event: 'speech_start' }` only when a REAL human voice is detected — TTS
+ * echo / music / ambient noise never trip it.
+ */
+export class VadStream {
+  private ws: WebSocket | null = null
+  private buffered: ArrayBuffer[] = []
+  private closed = false
+
+  /**
+   * @param onSpeechStart - fired once when silero VAD hears speech.
+   */
+  open(onSpeechStart: () => void): void {
+    if (this.ws !== null) return
+    this.closed = false
+    const proto = bridgeBase().startsWith('https:') ? 'wss:' : 'ws:'
+    const url = `${proto}//${bridgeBase().replace(/^https?:\/\//, '')}/api/vad`
+    const ws = new WebSocket(url)
+    this.ws = ws
+    ws.binaryType = 'arraybuffer'
+    ws.onopen = () => {
+      for (const chunk of this.buffered.splice(0)) {
+        ws.send(chunk)
+      }
+    }
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(String(event.data)) as { event?: string }
+        if (msg.event === 'speech_start') onSpeechStart()
+      } catch {
+        // ignore malformed frames
+      }
+    }
+    ws.onclose = () => {
+      if (this.ws === ws) this.ws = null
+    }
+  }
+
+  /** Push one 16 kHz PCM16 chunk (no-op while the socket is down). */
+  send(pcm16: ArrayBuffer): void {
+    const ws = this.ws
+    if (ws === null || this.closed) return
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(pcm16)
+    } else if (ws.readyState === WebSocket.CONNECTING) {
+      this.buffered.push(pcm16)
+      if (this.buffered.length > 64) this.buffered.shift()
+    }
+  }
+
+  close(): void {
+    this.closed = true
+    this.buffered = []
+    const ws = this.ws
+    this.ws = null
+    if (ws !== null) {
+      try { ws.close() } catch { /* already closed */ }
+    }
+  }
+}

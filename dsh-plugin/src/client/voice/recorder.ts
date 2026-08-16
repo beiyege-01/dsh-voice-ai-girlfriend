@@ -10,6 +10,7 @@
  * listening is a T7 enhancement).
  */
 import { MIC_CAPTURE_WORKLET_SOURCE } from '../worklets/mic-capture.ts'
+import type { VadStream } from '../bridge.ts'
 
 const DEFAULT_MIN_SILENCE_MS = 1800
 const DEFAULT_MAX_UTTERANCE_MS = 30000
@@ -20,17 +21,20 @@ export interface MicRecorderOptions {
   minSilenceMs?: number
   maxUtteranceMs?: number
   rmsThreshold?: number
-  /** RMS threshold for barge-in detection during playback (higher than the
-   *  utterance threshold; the browser AEC should keep TTS echo below it). */
+  /** Streamed to the bridge's silero VAD while a reply is playing; its
+   *  `speech_start` is the barge-in trigger. When absent, the recorder falls
+   *  back to the RMS heuristics below (interruptThreshold / hold / confirm). */
+  vad?: VadStream
+  /** RMS threshold for barge-in detection during playback (fallback path). */
   interruptThreshold?: number
-  /** Sustained above-threshold time (ms) before a barge-in fires. */
+  /** Sustained above-threshold time (ms) before a barge-in fires (fallback). */
   interruptHoldMs?: number
   /** After a barge-in fires, keep requiring the signal for this long before
-   *  accumulating — a false alarm never becomes an utterance. */
+   *  accumulating — a false alarm never becomes an utterance (fallback). */
   interruptConfirmMs?: number
-  /** Called once when sustained speech is detected while a reply is playing
-   *  (barge-in); the recorder then switches back to normal accumulation so
-   *  the user's ongoing speech becomes the next utterance. */
+  /** Called once when speech is detected while a reply is playing (barge-in);
+   *  the recorder then switches back to normal accumulation so the user's
+   *  ongoing speech becomes the next utterance. */
   onSpeechInterrupt?: () => void
   /** Called once with the complete silence-endpointed utterance (PCM16). */
   onUtterance: (pcm16: ArrayBuffer) => void
@@ -84,22 +88,35 @@ export class MicRecorder {
   }
 
   /**
-   * Barge-in listening mode (during reply playback): chunks are dropped (the
-   * TTS echo must never form an utterance), but levels keep flowing — when
-   * RMS stays above `interruptThreshold` for `interruptHoldMs`, `onSpeechInterrupt`
-   * fires once (the reply is stopped). The recorder does NOT switch to normal
-   * accumulation right away: it stays in interrupt mode until the same signal
-   * keeps coming for another `interruptConfirmMs` — only then is the user
-   * confirmed to really be speaking and accumulation starts. A false alarm
-   * (TTS echo / ambient noise that already stopped the reply) never turns
-   * into a spoken utterance.
+   * Barge-in listening mode (during reply playback): chunks are streamed to
+   * the bridge's silero VAD (never accumulated), which fires `speech_start`
+   * only for a REAL human voice — TTS echo / music / ambient noise cannot
+   * trip it. On `speech_start` the recorder leaves interrupt mode and the
+   * user's ongoing speech accumulates normally.
    */
   setInterruptMode(enabled: boolean): void {
     if (this.interruptMode === enabled) return
     this.interruptMode = enabled
     this.interruptArmed = false
     this.confirmArmed = false
-    if (!enabled) this.resetBuffers()
+    if (enabled) {
+      this.opts.vad?.open(() => this.onVadSpeechStart())
+    } else {
+      this.opts.vad?.close()
+      this.resetBuffers()
+    }
+  }
+
+  /** Bridge VAD heard a real voice: stop the reply and accumulate the user's
+   *  ongoing speech. (silero's speech_start is already the confirmation — no
+   *  RMS hold/confirm heuristics needed on this path.) */
+  private onVadSpeechStart(): void {
+    if (!this.interruptMode) return
+    this.interruptMode = false
+    this.interruptArmed = false
+    this.confirmArmed = false
+    this.resetBuffers()
+    this.opts.onSpeechInterrupt?.()
   }
 
   private resetBuffers(): void {
@@ -160,6 +177,7 @@ export class MicRecorder {
       clearTimeout(this.maxTimer)
       this.maxTimer = null
     }
+    this.opts.vad?.close()
     this.node?.port.close()
     this.source?.disconnect()
     this.stream?.getTracks().forEach((track) => track.stop())
@@ -179,34 +197,30 @@ export class MicRecorder {
   private onLevel(rms: number): void {
     if (this.released || this.paused) return
 
-    // Barge-in mode: watch for sustained speech (the user talking over the
-    // reply); chunks are dropped so the TTS echo never forms an utterance.
+    // Barge-in mode: stream to the bridge VAD (never accumulate). Without a
+    // VadStream (bridge without the endpoint), fall back to the RMS heuristics.
     if (this.interruptMode) {
-      const threshold = this.opts.interruptThreshold ?? DEFAULT_INTERRUPT_THRESHOLD
-      const now = performance.now()
-      if (rms >= threshold) {
-        if (!this.interruptArmed) {
-          this.interruptArmed = true
-          this.interruptHoldStart = now
-        } else if (!this.confirmArmed && now - this.interruptHoldStart >= (this.opts.interruptHoldMs ?? DEFAULT_INTERRUPT_HOLD_MS)) {
-          // Barge-in confirmed: stop the reply, then require the same signal
-          // to keep coming before we start accumulating (anti-false-alarm).
-          this.opts.onSpeechInterrupt?.()
-          this.confirmArmed = true
-          this.confirmStart = now
-        } else if (this.confirmArmed && now - this.confirmStart >= (this.opts.interruptConfirmMs ?? DEFAULT_INTERRUPT_CONFIRM_MS)) {
-          // The user is really speaking: leave interrupt mode and let their
-          // ongoing speech accumulate as the next utterance.
-          this.confirmArmed = false
+      if (this.opts.vad === undefined) {
+        const threshold = this.opts.interruptThreshold ?? DEFAULT_INTERRUPT_THRESHOLD
+        const now = performance.now()
+        if (rms >= threshold) {
+          if (!this.interruptArmed) {
+            this.interruptArmed = true
+            this.interruptHoldStart = now
+          } else if (!this.confirmArmed && now - this.interruptHoldStart >= (this.opts.interruptHoldMs ?? DEFAULT_INTERRUPT_HOLD_MS)) {
+            this.opts.onSpeechInterrupt?.()
+            this.confirmArmed = true
+            this.confirmStart = now
+          } else if (this.confirmArmed && now - this.confirmStart >= (this.opts.interruptConfirmMs ?? DEFAULT_INTERRUPT_CONFIRM_MS)) {
+            this.confirmArmed = false
+            this.interruptArmed = false
+            this.interruptMode = false
+            this.resetBuffers()
+          }
+        } else {
           this.interruptArmed = false
-          this.interruptMode = false
-          this.resetBuffers()
+          this.confirmArmed = false
         }
-      } else {
-        // Signal dropped: either the reply finished on its own or a false
-        // alarm already stopped it — never accumulate anything.
-        this.interruptArmed = false
-        this.confirmArmed = false
       }
       return
     }
@@ -222,7 +236,12 @@ export class MicRecorder {
   }
 
   private onChunk(buffer: ArrayBuffer): void {
-    if (this.released || this.paused || this.interruptMode) return
+    if (this.released || this.paused) return
+    if (this.interruptMode) {
+      // Barge-in mode: stream to the bridge VAD, never accumulate.
+      this.opts.vad?.send(buffer)
+      return
+    }
     this.chunks.push(buffer)
     this.chunkBytes += buffer.byteLength
     if (!this.speaking) return
