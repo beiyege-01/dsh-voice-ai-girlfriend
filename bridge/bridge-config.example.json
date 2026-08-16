@@ -34,5 +34,11 @@
   "media": {
     "bg_images_dir": "assets/bg-images",
     "task_videos_dir": "assets/task-videos"
+  },
+  "qq": {
+    "enabled": false,
+    "napcat_base": "http://127.0.0.1:3000",
+    "napcat_token": "你的NapCat OneBot token",
+    "target_qq": 0
   }
 }

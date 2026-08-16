@@ -436,6 +436,171 @@ if TASK_VIDEOS_DIR.is_dir():
     app.mount("/media/task-videos", StaticFiles(directory=str(TASK_VIDEOS_DIR)), name="media-task")
 
 
+# ── QQ 推送（NapCat OneBot）───────────────────────────────────────────────
+#
+# Sends text and TTS voice to a target QQ via a local NapCat OneBot v11 HTTP
+# endpoint. Config (bridge-config.json):
+#   "qq": {
+#     "enabled": true,
+#     "napcat_base": "http://127.0.0.1:3000",
+#     "napcat_token": "",
+#     "target_qq": 0
+#   }
+
+class QQSendRequest(BaseModel):
+    text: str
+    voice: bool = False
+    user_id: int | None = None  # override the configured target
+
+
+@app.post("/api/qq/send")
+async def qq_send(req: QQSendRequest) -> dict:
+    """Send { text } (and optionally TTS voice) to the configured QQ."""
+    qq = CONFIG.get("qq", {})
+    if not qq.get("enabled"):
+        raise HTTPException(status_code=400, detail="QQ push disabled in bridge-config.json")
+    base = qq.get("napcat_base", "http://127.0.0.1:3000")
+    token = qq.get("napcat_token", "")
+    user_id = req.user_id or qq.get("target_qq")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="target_qq not configured")
+    if not req.text.strip() and not req.voice:
+        raise HTTPException(status_code=400, detail="Empty text")
+
+    from qq_bridge import send_text, send_voice
+
+    try:
+        if req.voice:
+            if not req.text.strip():
+                raise HTTPException(status_code=400, detail="voice needs text to synthesize")
+            text = (req.text or "").strip()[:512]
+            cancel = threading.Event()
+            async with models.infer_lock:
+                handler = await models.ensure_tts()
+                samples = await asyncio.to_thread(_synthesize, handler, text, cancel)
+            result = send_voice(base, token, user_id, samples.astype("<i2").tobytes())
+        else:
+            result = send_text(base, token, user_id, req.text.strip()[:2000])
+        return {"ok": True, "user_id": user_id, "napcat": result}
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 - surfaced to the client
+        logger.exception("QQ send failed")
+        raise HTTPException(status_code=502, detail=f"QQ send failed: {exc}") from exc
+
+
+# ── QQ 双向：事件接收 + 插件 WS 桥 ────────────────────────────────────────
+#
+# NapCat 把消息事件 POST 到 /api/qq/event（HTTP 上报 postUrls）；桥接再把
+# 私聊文本推给已连接的浏览器插件（/api/qq/ws）。插件注入 DSH，回复完成后
+# 把回复文本发回桥接（WS {"type":"reply"}），桥接 TTS→silk→QQ 发出。
+# 单连接设计（个人使用）：新连接顶掉旧连接。
+
+_qq_ws_conn: WebSocket | None = None
+_qq_ws_lock = asyncio.Lock()
+
+
+async def _qq_push(json_msg: dict) -> None:
+    global _qq_ws_conn
+    async with _qq_ws_lock:
+        conn = _qq_ws_conn
+    if conn is not None:
+        try:
+            await conn.send_json(json_msg)
+        except Exception:
+            logger.debug("QQ ws push failed (client gone)", exc_info=True)
+
+
+@app.post("/api/qq/event")
+async def qq_event(body: dict) -> dict:
+    """OneBot v11 HTTP 上报入口（NapCat postUrls）。私聊文本消息 → 推给插件。"""
+    try:
+        post_type = body.get("post_type")
+        if post_type == "message" and body.get("message_type") == "private":
+            user_id = body.get("user_id")
+            text = str(body.get("raw_message") or body.get("message") or "").strip()
+            if user_id and text:
+                await _qq_push({"type": "qq_message", "user_id": user_id, "text": text})
+                logger.info("QQ event: %s -> %s", user_id, text[:40])
+    except Exception:  # noqa: BLE001 - never break the upstream event feed
+        logger.exception("QQ event handling failed")
+    return {"ok": True}
+
+
+@app.websocket("/api/qq/onebot")
+async def qq_onebot_ws(ws: WebSocket) -> None:
+    """NapCat WebSocket 客户端连到这里（OneBot 事件推送）。
+
+    在 NapCat WebUI 网络配置里添加一个「WebSocket 客户端」指向
+    ws://127.0.0.1:8765/api/qq/onebot，NapCat 会把全部事件推过来；
+    私聊文本消息同样经 _qq_push 转给浏览器插件。这绕开了 HTTP 3000
+    服务不稳定时的事件上报缺口。
+    """
+    await ws.accept()
+    try:
+        while True:
+            raw = await ws.receive_text()
+            if not raw.strip():
+                continue
+            try:
+                body = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            post_type = body.get("post_type")
+            if post_type == "message" and body.get("message_type") == "private":
+                user_id = body.get("user_id")
+                text = str(body.get("raw_message") or body.get("message") or "").strip()
+                if user_id and text:
+                    await _qq_push({"type": "qq_message", "user_id": user_id, "text": text})
+                    logger.info("QQ event(ws): %s -> %s", user_id, text[:40])
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("QQ onebot ws error")
+
+
+@app.websocket("/api/qq/ws")
+async def qq_ws(ws: WebSocket) -> None:
+    """插件桥连接：桥接 → 插件(qq_message)，插件 → 桥接(reply → 发 QQ)。"""
+    global _qq_ws_conn
+    await ws.accept()
+    async with _qq_ws_lock:
+        old = _qq_ws_conn
+        _qq_ws_conn = ws
+    if old is not None:
+        try:
+            await old.close()
+        except Exception:
+            pass
+    try:
+        while True:
+            raw = await ws.receive_json()
+            if not isinstance(raw, dict):
+                continue
+            if raw.get("type") == "reply":
+                text = str(raw.get("text") or "").strip()
+                if text:
+                    qq = CONFIG.get("qq", {})
+                    if qq.get("enabled"):
+                        try:
+                            # 先发原始文本，再发 TTS 语音（复用 /api/qq/send 逻辑）
+                            resp_text = await qq_send(QQSendRequest(text=text, voice=False))
+                            resp_voice = await qq_send(QQSendRequest(text=text, voice=True))
+                            await ws.send_json({"type": "sent", "ok": True, "text": resp_text, "voice": resp_voice})
+                        except HTTPException as exc:
+                            await ws.send_json({"type": "sent", "ok": False, "detail": exc.detail})
+                    else:
+                        await ws.send_json({"type": "sent", "ok": False, "detail": "QQ push disabled"})
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("QQ ws error")
+    finally:
+        async with _qq_ws_lock:
+            if _qq_ws_conn is ws:
+                _qq_ws_conn = None
+
+
 # ── Silero VAD endpoint (barge-in detection) ──────────────────────────────
 #
 # The original speech-to-speech project runs VAD on the SERVER with silero-vad,

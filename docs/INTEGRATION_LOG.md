@@ -261,3 +261,16 @@
   - -35dB 后正常说话识别不受影响(「我爸的手机壳」准确)。
 - **边界**:响亮持续环境音(风扇近距/家人说话/电视)任何 ASR 都挡不住,属物理限制;识别本身(清晰说话)准确。
 - release 已推送(commit 8ce803a)。
+
+## QQ 双向对话接入(2026-08-16,已验收 ✅)
+
+- **需求**:让 DSH 的回复文本 + TTS 语音发到用户微信/QQ;最终选定 QQ(NapCatQQ)+ 双向(QQ 消息触发)。
+- **方案**:
+  - NapCatQQ(Shell 版,注入 QQ 9.9.32 小号 3898687919)提供 OneBot v11 HTTP(3000)+ WebSocket 事件通道。
+  - 桥接新增 qq_bridge.py(发文本 + TTS→pilk silk 语音 + Bearer 鉴权)+ /api/qq/send、/api/qq/event、/api/qq/onebot(WS 收 NapCat 事件)、/api/qq/ws(插件桥)。
+  - 插件新增 voice/qq-bridge.tsx(隐藏组件):WS 连桥接,QQ 消息 → sendText 注入;新 settled 回复 → 文本回传桥接 → 文本+语音发回 QQ。
+- **验证**:
+  - 发文本 ✅ / 发 silk 语音 ✅(mp3 发不出,必须 silk;pilk 转换)。
+  - 双向闭环 ✅:手机 QQ 主号发消息 → NapCat WS → 桥接 → 插件 → DSH 注入 → 回复 → 文本+语音回主号。
+  - 踩坑记录:给自己发语音收不到(QQ 限制);NapCat 重启后 OneBot 3000 不稳定(须 WebUI 管理);事件通道必须 WebSocket 客户端(配成服务器抢 8765);WebUI token 每次变(改 webui.json)。
+- release 已同步(qq_bridge.py/voice_bridge.py 合并/插件 qq-bridge.tsx/index.ts/requirements 加 pilk/example config 加 qq 段/README 十、QQ 双向对话 + 踩坑表)。

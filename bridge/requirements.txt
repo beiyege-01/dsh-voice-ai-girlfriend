@@ -9,3 +9,4 @@ soundfile
 scipy
 funasr
 modelscope
+pilk

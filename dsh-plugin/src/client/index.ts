@@ -13,6 +13,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { MicButton } from './MicButton.tsx'
 import { BusyToggle } from './BusyToggle.tsx'
 import { ReplySpeakerMount } from './voice/reply-listener.tsx'
+import { QQBridge } from './voice/qq-bridge.tsx'
 import { ReplySpeaker } from './voice/speaker.ts'
 import { VoiceToggle } from './VoiceToggle.tsx'
 import { CompanionToggle } from './CompanionToggle.tsx'
@@ -185,5 +186,18 @@ export function apply(ctx: ClientContext): void {
       inject: injectFace,
     },
     CompanionWindow,
+  ))
+
+  // Hidden QQ bridge: private-message inbound -> sendText; settled replies ->
+  // bridge -> TTS voice -> QQ. Renders null; no-op when qq disabled.
+  ctx.slots.inject('conversation.input.left', () => ctx.slots.register(
+    {
+      name: 'conversation.input.left',
+      id: 'voice-qq-bridge',
+      order: 96,
+      locale: NS,
+      inject: injectFace,
+    },
+    QQBridge,
   ))
 }
