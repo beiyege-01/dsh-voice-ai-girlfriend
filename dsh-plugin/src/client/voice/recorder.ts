@@ -25,6 +25,9 @@ export interface MicRecorderOptions {
   interruptThreshold?: number
   /** Sustained above-threshold time (ms) before a barge-in fires. */
   interruptHoldMs?: number
+  /** After a barge-in fires, keep requiring the signal for this long before
+   *  accumulating — a false alarm never becomes an utterance. */
+  interruptConfirmMs?: number
   /** Called once when sustained speech is detected while a reply is playing
    *  (barge-in); the recorder then switches back to normal accumulation so
    *  the user's ongoing speech becomes the next utterance. */
@@ -33,9 +36,16 @@ export interface MicRecorderOptions {
   onUtterance: (pcm16: ArrayBuffer) => void
 }
 
-/** Default barge-in level (~ -30 dBFS) and hold time. */
-const DEFAULT_INTERRUPT_THRESHOLD = 0.03
+/** Default barge-in level (~ -24 dBFS) and hold time.
+ *  0.06 is well above TTS echo residue that slips past browser AEC, so a
+ *  reply playing by itself rarely trips the interrupt; real speech is
+ *  typically much louder than this. */
+const DEFAULT_INTERRUPT_THRESHOLD = 0.06
 const DEFAULT_INTERRUPT_HOLD_MS = 250
+/** After a barge-in fires, the signal must STILL be above threshold for this
+ *  long before the recorder starts accumulating — otherwise the "interrupt"
+ *  was ambient noise / TTS echo and nothing is ever spoken. */
+const DEFAULT_INTERRUPT_CONFIRM_MS = 180
 
 export class MicRecorder {
   private ctx: AudioContext | null = null
@@ -52,6 +62,8 @@ export class MicRecorder {
   private interruptMode = false
   private interruptArmed = false
   private interruptHoldStart = 0
+  private confirmArmed = false
+  private confirmStart = 0
 
   constructor(private readonly opts: MicRecorderOptions) {}
 
@@ -75,13 +87,18 @@ export class MicRecorder {
    * Barge-in listening mode (during reply playback): chunks are dropped (the
    * TTS echo must never form an utterance), but levels keep flowing — when
    * RMS stays above `interruptThreshold` for `interruptHoldMs`, `onSpeechInterrupt`
-   * fires once and the recorder returns to normal accumulation so the user's
-   * ongoing speech becomes the next utterance.
+   * fires once (the reply is stopped). The recorder does NOT switch to normal
+   * accumulation right away: it stays in interrupt mode until the same signal
+   * keeps coming for another `interruptConfirmMs` — only then is the user
+   * confirmed to really be speaking and accumulation starts. A false alarm
+   * (TTS echo / ambient noise that already stopped the reply) never turns
+   * into a spoken utterance.
    */
   setInterruptMode(enabled: boolean): void {
     if (this.interruptMode === enabled) return
     this.interruptMode = enabled
     this.interruptArmed = false
+    this.confirmArmed = false
     if (!enabled) this.resetBuffers()
   }
 
@@ -94,6 +111,7 @@ export class MicRecorder {
     this.chunkBytes = 0
     this.speaking = false
     this.interruptArmed = false
+    this.confirmArmed = false
   }
 
   /** Acquire the mic and start the capture worklet. */
@@ -155,6 +173,7 @@ export class MicRecorder {
     this.speaking = false
     this.interruptMode = false
     this.interruptArmed = false
+    this.confirmArmed = false
   }
 
   private onLevel(rms: number): void {
@@ -164,20 +183,30 @@ export class MicRecorder {
     // reply); chunks are dropped so the TTS echo never forms an utterance.
     if (this.interruptMode) {
       const threshold = this.opts.interruptThreshold ?? DEFAULT_INTERRUPT_THRESHOLD
+      const now = performance.now()
       if (rms >= threshold) {
         if (!this.interruptArmed) {
           this.interruptArmed = true
-          this.interruptHoldStart = performance.now()
-        } else if (performance.now() - this.interruptHoldStart >= (this.opts.interruptHoldMs ?? DEFAULT_INTERRUPT_HOLD_MS)) {
-          // Barge-in confirmed: leave interrupt mode (the user's ongoing
-          // speech now accumulates normally) and notify the caller.
-          this.interruptMode = false
-          this.interruptArmed = false
-          this.resetBuffers()
+          this.interruptHoldStart = now
+        } else if (!this.confirmArmed && now - this.interruptHoldStart >= (this.opts.interruptHoldMs ?? DEFAULT_INTERRUPT_HOLD_MS)) {
+          // Barge-in confirmed: stop the reply, then require the same signal
+          // to keep coming before we start accumulating (anti-false-alarm).
           this.opts.onSpeechInterrupt?.()
+          this.confirmArmed = true
+          this.confirmStart = now
+        } else if (this.confirmArmed && now - this.confirmStart >= (this.opts.interruptConfirmMs ?? DEFAULT_INTERRUPT_CONFIRM_MS)) {
+          // The user is really speaking: leave interrupt mode and let their
+          // ongoing speech accumulate as the next utterance.
+          this.confirmArmed = false
+          this.interruptArmed = false
+          this.interruptMode = false
+          this.resetBuffers()
         }
       } else {
+        // Signal dropped: either the reply finished on its own or a false
+        // alarm already stopped it — never accumulate anything.
         this.interruptArmed = false
+        this.confirmArmed = false
       }
       return
     }

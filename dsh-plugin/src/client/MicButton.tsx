@@ -106,8 +106,9 @@ export const MicButton = memo(function MicButton({ t, sendText, speaker, interru
       minSilenceMs: 1800,
       maxUtteranceMs: 30000,
       rmsThreshold: 0.01,
-      interruptThreshold: 0.03,
+      interruptThreshold: 0.06,
       interruptHoldMs: 250,
+      interruptConfirmMs: 180,
       onSpeechInterrupt: () => {
         // The user started talking over the reply: stop it and swallow the
         // rest; the recorder (now accumulating) turns their speech into the
