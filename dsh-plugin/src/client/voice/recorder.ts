@@ -32,6 +32,11 @@ export interface MicRecorderOptions {
   /** After a barge-in fires, keep requiring the signal for this long before
    *  accumulating — a false alarm never becomes an utterance (fallback). */
   interruptConfirmMs?: number
+  /** Noise gate threshold in dBFS (0 or undefined = disabled). Quiet ambient
+   *  audio below this level is faded out of the SENT mic stream — mirrors the
+   *  original project's worklet gate (the attack/hold/release envelope
+   *  already lives in the embedded worklet; this just arms it). */
+  noiseGateDb?: number
   /** Called once when speech is detected while a reply is playing (barge-in);
    *  the recorder then switches back to normal accumulation so the user's
    *  ongoing speech becomes the next utterance. */
@@ -158,6 +163,13 @@ export class MicRecorder {
       numberOfOutputs: 0,
       processorOptions: { chunkMs: 40 },
     })
+    // Arm the noise gate (mirrors the original project): quiet ambient audio
+    // below `noiseGateDb` is faded out of the SENT stream. The worklet already
+    // carries the full attack/hold/release envelope — this message enables it.
+    const gateDb = this.opts.noiseGateDb
+    if (gateDb !== undefined && gateDb > 0) {
+      node.port.postMessage({ kind: 'gate', enabled: true, thresholdDb: gateDb })
+    }
     node.port.onmessage = (e) => {
       if (this.released) return
       const data = e.data
