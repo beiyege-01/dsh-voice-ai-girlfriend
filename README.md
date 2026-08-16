@@ -298,14 +298,18 @@ venv-speech\Scripts\python.exe bridge\smoke_tts.py --text "你好，我是小雅
 bridge\start-bridge.cmd
 ```
 
-**一键全套**（桥接 + DSH Web + 浏览器）：
+**一键全套**（桥接 + NapCatQQ + DSH Web + 浏览器）：
 
 ```powershell
 set DSH_HARNESS=C:\dev\deepseek-harness
+set NAPCAT_DIR=D:\QQ\NapCat\napcat   rem 可选：NapCat 安装目录（默认此值）
 bridge\start-all.cmd
 ```
 
-> `DSH_HARNESS` 指向你第一步准备的那份 DSH 源码树（第六部分安装过插件的那个）。
+> - `DSH_HARNESS` 指向你第一步准备的那份 DSH 源码树（第六部分安装过插件的那个）。
+> - `start-all.cmd` 会自动：起桥接 → 起 NapCatQQ（**会关闭所有运行中的 QQ 进程**再注入小号）→ 起 DSH Web → 开浏览器。
+> - 不想自动起 NapCat（比如你要在电脑上正常用主号 QQ）：`bridge\start-all.cmd nq`（跳过 NapCat，QQ 双向聊天不工作）。
+> - 只想单独起 NapCat：`bridge\start-napcat.cmd`（会等 OneBot :3000 就绪，失败时提示去 WebUI 检查）。
 
 ## 十、QQ 双向对话（可选）
 

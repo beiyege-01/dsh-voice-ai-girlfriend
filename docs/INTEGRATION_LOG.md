@@ -282,3 +282,16 @@
 - **验证**:古风少女雪景图、雨夜长街图、小雅"自拍照"(偷拍视角)三张均成功发到主号 506027232。
 - **玩法闭环**:QQ 里说「画一张…」→ 我(DSH agent)用 gen-image 生成 → /api/qq/image 推图 → 用户手机 QQ 收图。
 - release 已同步(qq_bridge.py send_image + voice_bridge /api/qq/image + README 更新)。
+
+## 一键启动:NapCat 纳入启动链(2026-08-16)
+
+- **需求**:重启后 QQ 桥接(NapCat)也要能一键启动,明确启动顺序。
+- **启动顺序**(start-dsh-voice.cmd / start-all.cmd 三合一):
+  1. voice bridge (8765) → 等 health
+  2. **NapCatQQ**(新 start-napcat.cmd:taskkill QQ → launcher-win10-user.bat 注入小号 → 等 OneBot :3000 就绪,最多 60s)
+  3. DSH web (3080) → 浏览器
+- **注意**:NapCat 启动会关闭所有运行中的 QQ 进程(注入需要 QQ 未运行)——主号在电脑 QQ 上会被顶掉,用手机 QQ 看。
+- **跳过开关**:start-dsh-voice.cmd nq / start-all.cmd nq 跳过 NapCat(只想语音、不想关 QQ 时)。
+- **单独启动**:start-napcat.cmd(等 3000 就绪,失败提示去 WebUI 6099 检查 HTTP 服务)。
+- **顺序要点**:桥接先起(8765 空闲)→ NapCat 起来后其 WebSocket 客户端自动连桥接 /api/qq/onebot(配置持久化)→ QQ 双向自动恢复,无需手动重连。
+- release 已同步(start-napcat.cmd NAPCAT_DIR 可配置 + start-all.cmd 集成 + README 启动顺序说明)。

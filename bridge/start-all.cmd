@@ -43,6 +43,13 @@ for /l %%i in (1,1,30) do (
 echo [WARN] bridge did not answer within 30s; continuing anyway.
 :bridge_ok
 
+rem --- start NapCatQQ (QQ two-way bridge). SKIP with: start-all.cmd /nq ---
+if /I "%~1"=="nq" goto :skip_napcat
+echo.
+echo [NapCat] Starting QQ bridge (closes running QQ, injects the bot account)...
+call "%~dp0start-napcat.cmd" >nul 2>&1
+:skip_napcat
+
 rem --- start dsh web if the harness tree is configured ---
 if "%DSH_HARNESS%"=="" goto :no_harness
 if not exist "%DSH_HARNESS%\package.json" goto :no_harness
