@@ -135,7 +135,7 @@ pnpm install
 |---|---|
 | 本项目代码 + 素材 | ~8MB |
 | Python 虚拟环境 + 依赖（含 PyTorch） | ~5-8GB |
-| whisper-large-v3 模型 | ~3GB |
+| FunASR Paraformer 模型（models/funasr/） | ~850MB |
 | Qwen3-TTS 模型 | ~2GB |
 | deepseek-harness + node_modules | ~2-4GB |
 
@@ -251,7 +251,7 @@ copy bridge\bridge-config.example.json bridge\bridge-config.json
 |---|---|
 | `media.bg_images_dir` / `task_videos_dir` | 相对路径，基于项目根自动解析 |
 | `tts.ref_audio` | 默认读取项目根的 `ref_audio.wav` |
-| `stt.*` | whisper 配置，默认即可 |
+| `stt.*` | FunASR 中文识别配置（backend=funasr，模型在 models/funasr/），默认即可 |
 
 ## 六、先验证桥接（强烈建议）
 
@@ -389,7 +389,7 @@ WebUI → 网络配置：
 
 3. **第一次 TTS 很慢（10~60s）** → 正常。模型首次懒加载 + 预热，之后每句约 0.5s 出音。
 
-4. **STT 偶尔识别为空** → whisper 对超短语音（1 个 token）会判空丢弃，日志可见 `degenerate (1-token)`，属正常防护。
+4. **STT 偶尔识别为空** → FunASR 对超短语音/纯噪声会返回空结果被丢弃（日志见 `funasr returned empty result`）；若切换到 whisper 后端，则其 1-token 退化也会被判空，均属正常防护。
 
 5. **桥接启动但模型加载失败** → 检查 `bridge-config.json` 里 `tts.model_name` 路径是否存在（路径拼写、盘符、斜杠方向），以及显卡驱动是否够新（见前置第 4 条）。
 
