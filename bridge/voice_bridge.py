@@ -65,6 +65,11 @@ def load_config() -> dict:
     with open(CONFIG_PATH, encoding="utf-8") as f:
         cfg = json.load(f)
 
+    # FunASR STT model is a LOCAL directory in this repo (models/funasr/...)
+    # — resolve it relative to the repo root like the other paths.
+    if cfg.get("stt", {}).get("backend") == "funasr" and cfg["stt"].get("model_name"):
+        cfg["stt"]["model_name"] = _resolve_path(cfg["stt"]["model_name"])
+
     tts = cfg.setdefault("tts", {})
     if tts.get("model_name"):
         tts["model_name"] = _resolve_path(tts["model_name"])
@@ -430,6 +435,7 @@ if BG_IMAGES_DIR.is_dir():
 if TASK_VIDEOS_DIR.is_dir():
     app.mount("/media/task-videos", StaticFiles(directory=str(TASK_VIDEOS_DIR)), name="media-task")
 
+
 # ── Silero VAD endpoint (barge-in detection) ──────────────────────────────
 #
 # The original speech-to-speech project runs VAD on the SERVER with silero-vad,
@@ -438,65 +444,75 @@ if TASK_VIDEOS_DIR.is_dir():
 # sounds kept tripping the barge-in and got STT'd into phantom messages.
 #
 # /api/vad is a WebSocket: while a reply is playing the client streams its mic
-# PCM16 chunks here; the server feeds them to the same VADHandler the original
-# project uses and replies {"event":"speech_start"} only when a real voice is
-# heard — the client then interrupts the reply. Chunks are never stored.
+# PCM16 chunks here; the server runs them through silero VAD (loaded from the
+# local <repo>/models/silero-vad/ directory, NOT the torch hub cache) and
+# replies {"event":"speech_start"} only when a real voice is heard — the
+# client then interrupts the reply. Chunks are never stored.
 
 class VADSession:
-    """One silero VAD session per WebSocket connection (lazy import)."""
+    """One silero VAD session per WebSocket connection.
+
+    Loads silero_vad_v4.jit (stable, no annotator) from <repo>/models/, falling
+    back to silero_vad.jit if the v4 file is absent. State (h/c) lives in the
+    jit model instance, so each session gets a fresh detector.
+    """
 
     def __init__(self) -> None:
-        from queue import Queue
-        from threading import Event
+        import torch
+        from speech_to_speech.VAD.vad_iterator import VADIterator
 
-        from speech_to_speech.VAD.vad_handler import VADHandler
+        models_dir = HERE / "models" / "silero-vad"
+        model_path = models_dir / "silero_vad_v4.jit"
+        if not model_path.is_file():
+            model_path = models_dir / "silero_vad.jit"
+        if not model_path.is_file():
+            raise RuntimeError(f"silero-vad model not found under {models_dir}")
 
-        self._events: Queue = Queue()
-        should_listen = Event()
-        should_listen.set()
-        self.vad = VADHandler(
-            Event(),  # base stop event (unused here)
-            queue_in=Queue(),
-            queue_out=Queue(),
-            setup_args=(should_listen,),
-            setup_kwargs={
-                "text_output_queue": self._events,
-                "sample_rate": 16000,
-                "thresh": 0.6,
-                "min_silence_ms": 64,
-                "min_speech_ms": 384,
-                "max_speech_ms": 30000,
-            },
+        self.model = torch.jit.load(str(model_path), map_location="cpu")
+        self.model.eval()
+        self.iterator = VADIterator(
+            self.model,
+            threshold=0.6,
+            sampling_rate=16000,
+            min_silence_duration_ms=64,
+            speech_pad_ms=30,
         )
+        self.min_speech_ms = 384
+        self.speech_started = False
+        # Byte buffer: client chunks (any size) accumulate until a full
+        # 512-sample window is available — silero gets CONTINUOUS audio, never
+        # zero-padded frames (padding between real audio breaks VAD state).
+        self._buf = b""
 
     def feed(self, pcm16: bytes) -> list[dict]:
         """Feed one 16 kHz PCM16 chunk (any size); returns outbound JSON events.
 
-        Silero VAD requires fixed 512-sample windows at 16 kHz, so arbitrary
-        client chunk sizes are split (tail window zero-padded). The handler
-        also clears its should_listen flag after each finished utterance —
-        re-arm it every frame so barge-in keeps listening across utterances.
-        VADAudio outputs (final utterances) are intentionally ignored here —
-        this endpoint only signals barge-in timing; the client keeps its own
-        utterance capture for STT.
+        Silero VAD requires fixed 512-sample windows at 16 kHz; chunks are
+        buffered and cut into 512-sample frames so the audio stream stays
+        contiguous. A barge-in fires once sustained speech reaches
+        min_speech_ms (384ms) — the same confirmation the original project
+        applies. VADAudio outputs (final utterances) are intentionally ignored
+        here — this endpoint only signals barge-in timing; the client keeps
+        its own capture for STT.
         """
         import numpy as np
+        import torch
 
+        self._buf += pcm16
         out: list[dict] = []
-        data = np.frombuffer(pcm16, dtype=np.int16)
-        for start in range(0, len(data), 512):
-            window = data[start:start + 512]
-            if len(window) < 512:
-                window = np.concatenate([window, np.zeros(512 - len(window), dtype=np.int16)])
-            self.vad.should_listen.set()
-            for _ in self.vad.process(window.tobytes()):
-                pass
-            while not self._events.empty():
-                ev = self._events.get_nowait()
-                if type(ev).__name__ == "SpeechStartedEvent":
+        while len(self._buf) >= 1024:  # 512 int16 samples = 1024 bytes
+            window = self._buf[:1024]
+            self._buf = self._buf[1024:]
+            x = np.frombuffer(window, dtype=np.int16).astype(np.float32) / 32768.0
+            utterance = self.iterator(torch.from_numpy(x))
+            if self.iterator.triggered and not self.speech_started:
+                active_ms = self.iterator.active_speech_samples / 16.0
+                if active_ms >= self.min_speech_ms:
+                    self.speech_started = True
                     out.append({"event": "speech_start"})
-                elif type(ev).__name__ == "SpeechStoppedEvent":
-                    out.append({"event": "speech_end"})
+            if utterance is not None:
+                self.speech_started = False
+                out.append({"event": "speech_end"})
         return out
 
 

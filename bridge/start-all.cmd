@@ -18,13 +18,19 @@ set "BRIDGE_PY=%REPO_ROOT%\venv-speech\Scripts\python.exe"
 
 if not exist "%BRIDGE_PY%" (
     echo [ERROR] venv-speech python not found: %BRIDGE_PY%
-    echo         Create it first, see README.md "安装" section.
+    echo         Create it first, see README.md "??" section.
     pause
     exit /b 1
 )
 
 rem --- start the voice bridge in its own minimized window ---
 cd /d "%REPO_ROOT%\bridge"
+if not exist "%REPO_ROOT%\models\silero-vad\silero_vad_v4.jit" (
+    echo [WARN] silero-vad model missing: %REPO_ROOT%\models\silero-vad\silero_vad_v4.jit
+)
+if not exist "%REPO_ROOT%\models\funasr" (
+    echo [WARN] funasr model dir missing: %REPO_ROOT%\models\funasr
+)
 echo Starting voice bridge on http://127.0.0.1:8765 ...
 start "voice-bridge" /min "%BRIDGE_PY%" -m uvicorn voice_bridge:app --host 127.0.0.1 --port 8765
 
@@ -56,3 +62,4 @@ echo        source tree and re-run this script to launch the GUI too.
 :done
 echo All services started. This window can be closed.
 pause
+

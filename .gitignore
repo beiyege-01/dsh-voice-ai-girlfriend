@@ -11,6 +11,8 @@ dist/
 lib/
 *.tsbuildinfo
 
+models/
+
 # ---- Local config with personal paths (never commit yours) ----
 bridge/bridge-config.json
 

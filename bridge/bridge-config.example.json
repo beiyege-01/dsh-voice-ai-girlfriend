@@ -4,7 +4,7 @@
   "cors_origins": ["http://127.0.0.1:3080", "http://localhost:3080"],
   "stt": {
     "backend": "funasr",
-    "model_name": "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+    "model_name": "models/funasr/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
     "device": "cuda",
     "torch_dtype": "float16",
     "compile_mode": null,

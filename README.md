@@ -35,6 +35,7 @@ dsh-voice-ai-girlfriend/
 │   ├── requirements.txt
 │   ├── start-bridge.cmd             # 只起桥接
 │   └── start-all.cmd                # 桥接 + DSH Web 一键启动
+├── models/            # 模型（gitignore，不入库）：funasr/ + silero-vad/
 ├── assets/            # 数字人素材
 │   ├── bg-images/     # 空闲动画（随仓库分发，7 个）
 │   └── task-videos/   # 回复说话动画（自备/API 回传，不随仓库分发）
@@ -155,18 +156,21 @@ pip install -r bridge\requirements.txt
 
 ## 三、准备模型（两个模型）
 
-### 1. STT 模型：FunASR Paraformer 中文模型（自动下载，不用手动装）
+### 1. STT 模型：FunASR Paraformer 中文模型（放本地 `models/` 目录）
 
-语音识别用**阿里 FunASR 中文 ASR**（Paraformer-large，专为中文设计，同音字/口音识别准确率远高于 whisper）。**首次说话时自动从 ModelScope 下载**（约 1GB），之后一直用缓存。想提前下载也可以：
+语音识别用**阿里 FunASR 中文 ASR**（Paraformer-large，专为中文设计，同音字/口音识别准确率远高于 whisper）。模型**放在仓库根的 `models/funasr/`**（约 850MB，已 gitignore 不入库）：
 
 ```powershell
 pip install modelscope
+# 1) 先下载到缓存（首次）
 python -c "from modelscope import snapshot_download; snapshot_download('iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch')"
+# 2) 把模型拷到项目的 models\funasr\ 下（文件名随意，配置里指向它）
+xcopy /E /I %USERPROFILE%\.cache\modelscope\models\iic--speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch\snapshots\master models\funasr\speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch
 ```
 
-> 想换回 whisper（如 `openai/whisper-large-v3` 或 `-turbo`）？把 `bridge-config.json` 里 `stt.backend` 改为 `"whisper"` 并把 `model_name` 换成 whisper 模型 id 即可（桥接双后端都支持）。
+**打断用 VAD 模型**（`models/silero-vad/silero_vad_v4.jit`，2MB）同样不入库，从 [silero-vad v4.0 tag](https://github.com/snakers4/silero-vad/tree/v4.0) 的 `files/silero_vad.jit` 获取（或使用本项目 release 附带的文件）。
 
-> 下载慢或失败？见"常见问题"第 2 条（HF/ModelScope 镜像）。
+> 想换回 whisper（如 `openai/whisper-large-v3` 或 `-turbo`）？把 `bridge-config.json` 里 `stt.backend` 改为 `"whisper"` 并把 `model_name` 换成 whisper 模型 id 即可（桥接双后端都支持）。
 
 ### 2. TTS 模型：Qwen3-TTS-12Hz-1.7B-Base（声音克隆模型，手动准备）
 
