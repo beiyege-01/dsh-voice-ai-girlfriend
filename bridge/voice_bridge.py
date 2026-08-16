@@ -453,6 +453,34 @@ class QQSendRequest(BaseModel):
     user_id: int | None = None  # override the configured target
 
 
+class QQImageRequest(BaseModel):
+    path: str
+    user_id: int | None = None
+
+
+@app.post("/api/qq/image")
+async def qq_send_image(req: QQImageRequest) -> dict:
+    """Send a local image file to the configured QQ."""
+    qq = CONFIG.get("qq", {})
+    if not qq.get("enabled"):
+        raise HTTPException(status_code=400, detail="QQ push disabled in bridge-config.json")
+    base = qq.get("napcat_base", "http://127.0.0.1:3000")
+    token = qq.get("napcat_token", "")
+    user_id = req.user_id or qq.get("target_qq")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="target_qq not configured")
+    if not Path(req.path).is_file():
+        raise HTTPException(status_code=404, detail=f"image not found: {req.path}")
+    from qq_bridge import send_image
+
+    try:
+        result = send_image(base, token, user_id, req.path)
+        return {"ok": True, "user_id": user_id, "napcat": result}
+    except Exception as exc:  # noqa: BLE001 - surfaced to the client
+        logger.exception("QQ image send failed")
+        raise HTTPException(status_code=502, detail=f"QQ image send failed: {exc}") from exc
+
+
 @app.post("/api/qq/send")
 async def qq_send(req: QQSendRequest) -> dict:
     """Send { text } (and optionally TTS voice) to the configured QQ."""

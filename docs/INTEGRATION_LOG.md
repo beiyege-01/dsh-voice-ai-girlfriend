@@ -274,3 +274,11 @@
   - 双向闭环 ✅:手机 QQ 主号发消息 → NapCat WS → 桥接 → 插件 → DSH 注入 → 回复 → 文本+语音回主号。
   - 踩坑记录:给自己发语音收不到(QQ 限制);NapCat 重启后 OneBot 3000 不稳定(须 WebUI 管理);事件通道必须 WebSocket 客户端(配成服务器抢 8765);WebUI token 每次变(改 webui.json)。
 - release 已同步(qq_bridge.py/voice_bridge.py 合并/插件 qq-bridge.tsx/index.ts/requirements 加 pilk/example config 加 qq 段/README 十、QQ 双向对话 + 踩坑表)。
+
+## QQ 发图片能力(2026-08-16,已验收 ✅)
+
+- **需求**:用户 QQ 远程聊天时,希望把生成的图片直接发到 QQ。
+- **实现**:qq_bridge.send_image(本地图片 → base64 内嵌 → image 消息,比 NapCat 读路径稳);voice_bridge 新增 POST /api/qq/image {path}。
+- **验证**:古风少女雪景图、雨夜长街图、小雅"自拍照"(偷拍视角)三张均成功发到主号 506027232。
+- **玩法闭环**:QQ 里说「画一张…」→ 我(DSH agent)用 gen-image 生成 → /api/qq/image 推图 → 用户手机 QQ 收图。
+- release 已同步(qq_bridge.py send_image + voice_bridge /api/qq/image + README 更新)。

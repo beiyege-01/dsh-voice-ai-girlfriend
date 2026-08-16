@@ -343,6 +343,7 @@ WebUI → 网络配置：
 ### 4. 验证
 
 - 从桥接发测试：`POST /api/qq/send {"text":"你好","voice":true}` → 主号收到文本+语音
+- 发图片：`POST /api/qq/image {"path":"C:/path/to/a.png"}` → 主号收到图片（agent 生成图片后可直接推给你）
 - 完整双向：用手机 QQ 主号**给小号发消息** → DSH 对话出现该消息 → 回复自动以文本+语音发回主号
 
 ### ⚠️ 易踩坑要点

@@ -70,6 +70,16 @@ def send_voice(base: str, token: str, user_id: int, pcm16: bytes) -> dict:
         return _call(base, token, "send_private_msg", {"user_id": user_id, "message": message})
 
 
+def send_image(base: str, token: str, user_id: int, image_path: str) -> dict:
+    """把本地图片作为图片消息发送（base64 内嵌，避免 NapCat 读路径失败）。"""
+    if not Path(image_path).is_file():
+        raise QQPushError(f"image not found: {image_path}")
+    data = Path(image_path).read_bytes()
+    b64 = __import__("base64").b64encode(data).decode("ascii")
+    message = [{"type": "image", "data": {"file": f"base64://{b64}"}}]
+    return _call(base, token, "send_private_msg", {"user_id": user_id, "message": message})
+
+
 def _write_wav(path: Path, pcm16: np.ndarray) -> None:
     import wave
 
