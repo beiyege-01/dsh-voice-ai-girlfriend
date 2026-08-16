@@ -12,6 +12,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { MicButton } from './MicButton.tsx'
 import { BusyToggle } from './BusyToggle.tsx'
+import { QqPushToggle } from './QqPushToggle.tsx'
 import { ReplySpeakerMount } from './voice/reply-listener.tsx'
 import { QQBridge } from './voice/qq-bridge.tsx'
 import { ReplySpeaker } from './voice/speaker.ts'
@@ -149,6 +150,18 @@ export function apply(ctx: ClientContext): void {
       inject: injectFace,
     },
     CompanionToggle,
+  ))
+
+  // QQ reply-push toggle (s2s.voice.qqPush): ON = replies auto-pushed to QQ.
+  ctx.slots.inject('conversation.input.left', () => ctx.slots.register(
+    {
+      name: 'conversation.input.left',
+      id: 'voice-qqpush-toggle',
+      order: 84,
+      locale: NS,
+      inject: injectFace,
+    },
+    QqPushToggle,
   ))
 
   // Busy-delivery toggle (s2s.voice.interrupt): steer the running turn

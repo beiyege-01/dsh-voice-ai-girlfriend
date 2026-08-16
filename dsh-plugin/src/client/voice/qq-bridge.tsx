@@ -19,6 +19,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { AssistantChatData } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { bridgeBase } from '../bridge.ts'
 import type { VoiceInjected } from '../contract.ts'
+import { readQqPush } from '../QqPushToggle.tsx'
 import { cleanReplyText } from './clean.ts'
 
 /** Full props: framework runtime share + `voice` locale seat + injected face. */
@@ -84,7 +85,9 @@ export const QQBridge = memo(function QQBridge({ useSession, sendText }: QQBridg
   }, [sendText])
 
   // New settled assistant reply -> push text to the bridge (it voices it to QQ).
+  // Skips entirely when the QQ push toggle is off.
   useEffect(() => {
+    if (!readQqPush()) return
     let maxAnchor = 0
     let newest: { anchor: number; text: string } | null = null
     for (const node of snapshot.chat.nodes.values()) {

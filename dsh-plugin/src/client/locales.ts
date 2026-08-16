@@ -12,6 +12,8 @@ export const zh = {
   'companion.offHint': '隐藏女友窗',
   'interrupt.onHint': '插话模式：说话打断当前回复并立即发送（点击切换为排队）',
   'interrupt.offHint': '排队模式：当前回复结束后自动发送，连续对话（点击切换为插话）',
+  'qqpush.onHint': '开启 QQ 推送（回复自动发到 QQ）',
+  'qqpush.offHint': '关闭 QQ 推送（回复不再发到 QQ）',
 } satisfies Record<string, string>
 
 /** The voice namespace key union. */
@@ -29,4 +31,6 @@ export const en = {
   'companion.offHint': 'Hide companion window',
   'interrupt.onHint': 'Interrupt mode: speaking cuts the reply and sends immediately (click for queue)',
   'interrupt.offHint': 'Queue mode: auto-sends after the current reply, for continuous conversation (click for interrupt)',
+  'qqpush.onHint': 'Turn on QQ push (replies sent to QQ)',
+  'qqpush.offHint': 'Turn off QQ push (replies no longer sent to QQ)',
 } satisfies Record<VoiceKey, string>
