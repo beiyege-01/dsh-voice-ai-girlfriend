@@ -306,3 +306,11 @@
 - **教训**:子脚本的 pause 被 call 时会把父脚本一起卡住;多服务启动脚本里,可阻塞的子流程必须独立窗口启动。
 - **正确用法**:双击 D:\speech-to-speech\start-dsh-voice.cmd(桥接+NapCat 独立窗+DSH web+浏览器);
 q 跳过 NapCat。
+
+## 追加:3080 端口占用导致一键脚本"起不来"(2026-08-16)
+
+- **现象**:用户先手动 pnpm dsh web 占着 3080,再跑 start-dsh-voice.cmd → dsh web 段报 EADDRINUSE,看似"起不来"。
+- **根因**:脚本无条件 start pnpm dsh web,端口已被手动进程占用 → 启动失败。
+- **修复**:dsh web 段先 curl 检测 3080,已监听则跳过启动(直接 goto web_up 开浏览器)。
+- **验证**:模拟脚本 dsh web 段(3080 被占时)复现 EADDRINUSE 错误确认根因;修复后已运行 3080 时脚本会提示"3080 already running - skipping"。
+- release start-all.cmd 同步修复。

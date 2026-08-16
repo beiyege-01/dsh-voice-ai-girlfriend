@@ -55,7 +55,13 @@ if "%DSH_HARNESS%"=="" goto :no_harness
 if not exist "%DSH_HARNESS%\package.json" goto :no_harness
 echo Starting DSH Web from %DSH_HARNESS% ...
 cd /d "%DSH_HARNESS%"
+rem Skip if 3080 is already serving (e.g. a manual pnpm dsh web is running)
+>nul 2>&1 curl -s -m 2 "http://127.0.0.1:3080" && (
+    echo [DSH] 3080 already running - skipping dsh web start.
+    goto :web_up
+)
 start /b pnpm dsh web
+:web_up
 timeout /t 3 /nobreak >nul
 start http://127.0.0.1:3080
 goto :done
