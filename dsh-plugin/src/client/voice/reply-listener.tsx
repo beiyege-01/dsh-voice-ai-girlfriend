@@ -79,8 +79,13 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
   // Serial TTS fetch chain: sentence N+1's fetch starts after N's resolves
   // (playback drains independently through the speaker queue — pipelined).
   const chainRef = useRef<Promise<void>>(Promise.resolve())
-  // Barge-in: swallow the rest of the current reply.
+  // Barge-in: swallow the CURRENT reply only. We record the exact anchor of
+  // the reply being interrupted (never a "<= max" line): if the interrupt
+  // flag is consumed after a NEW reply already appeared in the snapshot, a
+  // range-based skip would swallow that fresh reply too — the "new reply
+  // never speaks" bug. Exact-anchor skip lets later replies play normally.
   const interruptRef = useRef(false)
+  const skipAnchorRef = useRef(0)
   const skipUntilRef = useRef(0)
 
   // Register the barge-in handler once (the mic calls interruptReply).
@@ -101,15 +106,16 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
   useEffect(() => {
     if (!voiceEnabled()) return
 
-    // Barge-in swallowed the current reply: mark everything at/below the
-    // largest present anchor as skipped, then clear the flag for the next
-    // reply. (The swallow also aborts playback/fetch via interruptReply.)
+    // Barge-in swallowed the CURRENT reply: remember its exact anchor so only
+    // that reply's remaining sentences are skipped; replies that appear
+    // later (or that already appeared) still speak. (Playback/fetch abort is
+    // handled by interruptReply itself.)
     if (interruptRef.current) {
       let maxAnchor = 0
       for (const node of snapshot.chat.nodes.values()) {
         if (node.kind === 'assistant-step' && node.anchorSeq > maxAnchor) maxAnchor = node.anchorSeq
       }
-      skipUntilRef.current = maxAnchor
+      if (maxAnchor > 0) skipAnchorRef.current = maxAnchor
       interruptRef.current = false
       return
     }
@@ -144,6 +150,7 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
     for (const node of snapshot.chat.nodes.values()) {
       if (node.kind !== 'assistant-step') continue
       if (node.anchorSeq <= skipUntilRef.current) continue
+      if (node.anchorSeq === skipAnchorRef.current) continue
       const data = assistantData(node)
       if (data === undefined || data.status === 'interrupted') continue
       const { sentences, partial } = splitSentences(cleanReplyText(nodeText(data), 100000))
