@@ -167,7 +167,10 @@ export class MicRecorder {
     // below `noiseGateDb` is faded out of the SENT stream. The worklet already
     // carries the full attack/hold/release envelope — this message enables it.
     const gateDb = this.opts.noiseGateDb
-    if (gateDb !== undefined && gateDb > 0) {
+    // dBFS values are NEGATIVE (e.g. -35); 0 or undefined means disabled —
+    // a `> 0` guard would silently never arm the gate and ambient noise
+    // would reach STT untouched (phantom messages).
+    if (gateDb !== undefined && gateDb !== 0) {
       node.port.postMessage({ kind: 'gate', enabled: true, thresholdDb: gateDb })
     }
     node.port.onmessage = (e) => {
