@@ -338,3 +338,13 @@ q 跳过 NapCat。
 - **实现**(纯前端):新增 QqPushToggle(气泡图标,composer 工具行 order 84),状态存 localStorage s2s.voice.qqPush('1'默认开/'0'关);QQBridge 推送 reply 前检查该状态,关则跳过。QQ 消息注入(上行)不受影响。
 - 构建:tsc 零错误,served 65,760 B。**刷新页面生效**。
 - release 已同步。
+
+## 插件市场收录 + 空壳引导(2026-08-16)
+
+- **市场收录**:
+  - 主仓库/插件仓库均加 dsh-plugin + dsh topic → GitHub topic 聚合页 + dsh-plugin-marketplace 自动收录。
+  - 插件独立仓库 beiyege-01/dsh-voice-ai-girlfriend-plugin 创建(纯插件包,dsh.bundle manifest + esbuild 独立构建),本地 dsh plugin add 验证通过(bundle 加入 layer stack)。
+  - PR #1193 提交到 awesome-dsh-plugin(Notifications & Integrations 分类)。
+- **空壳问题**:普通用户只装插件 = 纯浏览器 UI,语音/QQ 依赖 Python 桥接 + NapCat(跑不进插件)。方案 A:新增 BridgeStatus 组件 —— 检测 /api/health,桥接不可达时工具行显示 ⚠ 按钮,点击跳主仓库部署指南;桥接正常时隐藏。
+- 三处同步:harness ui-voice(实际运行,已重建部署)、主仓库 release dsh-plugin/、插件仓库(独立构建 ec2b255)。
+- 教训:插件机制只装 JS;服务端依赖(桥接/模型/NapCat)必须引导用户装主仓库。

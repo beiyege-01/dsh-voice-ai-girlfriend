@@ -1,0 +1,18 @@
+.warn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-state-danger-primary, #e5484d);
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.warn:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}

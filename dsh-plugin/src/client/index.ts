@@ -13,6 +13,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { MicButton } from './MicButton.tsx'
 import { BusyToggle } from './BusyToggle.tsx'
 import { QqPushToggle } from './QqPushToggle.tsx'
+import { BridgeStatus } from './BridgeStatus.tsx'
 import { ReplySpeakerMount } from './voice/reply-listener.tsx'
 import { QQBridge } from './voice/qq-bridge.tsx'
 import { ReplySpeaker } from './voice/speaker.ts'
@@ -125,6 +126,19 @@ export function apply(ctx: ClientContext): void {
       inject: injectFace,
     },
     MicButton,
+  ))
+
+  // Bridge-down warning (order 83): shows a ⚠ button when the voice bridge is
+  // unreachable — the plugin alone is a hollow UI without the main repo.
+  ctx.slots.inject('conversation.input.left', () => ctx.slots.register(
+    {
+      name: 'conversation.input.left',
+      id: 'voice-bridge-status',
+      order: 83,
+      locale: NS,
+      inject: injectFace,
+    },
+    BridgeStatus,
   ))
 
   // Reply-reading toggle (s2s.voice.enabled; mic input stays independent).
