@@ -6,5 +6,6 @@ speech-to-speech==0.2.10
 fastapi
 uvicorn
 soundfile
+scipy
 funasr
 modelscope
