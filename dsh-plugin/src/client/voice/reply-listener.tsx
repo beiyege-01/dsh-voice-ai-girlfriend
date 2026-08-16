@@ -68,7 +68,14 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
 
   // Per-node complete sentences already spoken (node.key -> count).
   const spokenRef = useRef(new Map<string, number>())
-  const seededRef = useRef(false)
+  // History replay protection: baseline anchor. On mount the conversation
+  // snapshot can be EMPTY (session history loads asynchronously after a
+  // restart), so a one-shot seed there would miss the history and every old
+  // reply would replay. Instead we wait until the first SETTLED assistant
+  // node arrives, then set the baseline to the current max anchor — nothing
+  // at or below it ever speaks. Live (running) nodes are never used for the
+  // baseline, so a fresh reply in a brand-new session still speaks.
+  const baselineRef = useRef<number | null>(null)
   // Serial TTS fetch chain: sentence N+1's fetch starts after N's resolves
   // (playback drains independently through the speaker queue — pipelined).
   const chainRef = useRef<Promise<void>>(Promise.resolve())
@@ -107,17 +114,24 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
       return
     }
 
-    // First sight: seed every existing node's spoken count so pre-existing
-    // history never replays (page load, session revisit, history pagination).
-    if (!seededRef.current) {
+    // First settled assistant node arrives: freeze the history baseline so
+    // pre-existing replies never replay (page load, session revisit, history
+    // pagination). Running nodes are live replies — they are NOT used here,
+    // so a fresh reply in a new session still speaks.
+    if (baselineRef.current === null) {
+      let maxAnchor = 0
+      let hasSettled = false
       for (const node of snapshot.chat.nodes.values()) {
         if (node.kind !== 'assistant-step') continue
         const data = assistantData(node)
-        if (data === undefined || data.status === 'interrupted') continue
-        const { sentences } = splitSentences(cleanReplyText(nodeText(data), 100000))
-        spokenRef.current.set(node.key, sentences.length)
+        if (data === undefined) continue
+        if (data.status === 'settled') hasSettled = true
+        if (node.anchorSeq > maxAnchor) maxAnchor = node.anchorSeq
       }
-      seededRef.current = true
+      if (hasSettled && maxAnchor > 0) {
+        baselineRef.current = maxAnchor
+        skipUntilRef.current = maxAnchor
+      }
       return
     }
 
