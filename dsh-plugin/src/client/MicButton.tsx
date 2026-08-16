@@ -106,9 +106,11 @@ export const MicButton = memo(function MicButton({ t, sendText, speaker, interru
       minSilenceMs: 1800,
       maxUtteranceMs: 30000,
       rmsThreshold: 0.01,
-      // Noise gate (original project's worklet): -45 dBFS, quiet ambient
-      // audio fades out of the sent stream.
-      noiseGateDb: -45,
+      // Noise gate (original project's worklet): -35 dBFS. Tighter than the
+      // original's -45 so louder ambient hums (a desk fan measured ~ -40..
+      // -30 dB) get faded out of the sent stream, while normal speech
+      // (~ -26..-10 dB) passes untouched.
+      noiseGateDb: -35,
       // Barge-in: bridge silero VAD (real human voice only). RMS values are
       // the fallback used when the bridge lacks the /api/vad endpoint.
       vad: new VadStream(),
