@@ -72,3 +72,20 @@
 .handle:hover {
   background: rgba(255, 255, 255, 0.12);
 }
+
+/* Digital-human generation status pill (bottom center). */
+.dhCaption {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(10, 11, 16, 0.72);
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 5;
+}

@@ -13,6 +13,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { MicButton } from './MicButton.tsx'
 import { BusyToggle } from './BusyToggle.tsx'
 import { QqPushToggle } from './QqPushToggle.tsx'
+import { DigitalHumanToggle } from './DigitalHumanToggle.tsx'
 import { BridgeStatus } from './BridgeStatus.tsx'
 import { ReplySpeakerMount } from './voice/reply-listener.tsx'
 import { QQBridge } from './voice/qq-bridge.tsx'
@@ -189,6 +190,19 @@ export function apply(ctx: ClientContext): void {
       inject: injectFace,
     },
     BusyToggle,
+  ))
+
+  // Digital-human toggle (s2s.voice.digitalHuman): ON = replies wait for the
+  // lip-synced video (TTS+video together); OFF = near-instant sentence TTS.
+  ctx.slots.inject('conversation.input.left', () => ctx.slots.register(
+    {
+      name: 'conversation.input.left',
+      id: 'voice-dh-toggle',
+      order: 88,
+      locale: NS,
+      inject: injectFace,
+    },
+    DigitalHumanToggle,
   ))
 
   // Hidden per-session reply listener: speaks finalized assistant text.

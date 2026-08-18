@@ -16,7 +16,8 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pulls ui-conversation's SlotMap merge for PropsRuntime resolution.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { bridgeBase } from '../bridge.ts'
+import { bridgeBase, dhStatus, dhDiscard, tts, type DhStatus } from '../bridge.ts'
+import { readDigitalHuman } from '../DigitalHumanToggle.tsx'
 import type { VoiceInjected } from '../contract.ts'
 import css from './CompanionWindow.module.css'
 
@@ -60,8 +61,29 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
   const [taskVideos, setTaskVideos] = useState<string[]>([])
   const [bgIndex, setBgIndex] = useState(0)
   const [taskIndex, setTaskIndex] = useState(0)
+  // Digital human: bridge task state + the video currently being played.
+  const [dh, setDh] = useState<DhStatus | null>(null)
+  const [dhPlaying, setDhPlaying] = useState(false)
+  // Mirror of dhPlaying for the mount-time poll closure: driveDh is captured
+  // by the interval effect ([] deps), so reading the state variable there
+  // would always see the initial value — every poll would think playback is
+  // idle and restart the current segment (the "loops a segment" bug).
+  const dhPlayingRef = useRef(false)
+  const setDhPlayingBoth = useCallback((v: boolean) => {
+    dhPlayingRef.current = v
+    setDhPlaying(v)
+  }, [])
   const idleRef = useRef<HTMLVideoElement | null>(null)
   const speakRef = useRef<HTMLVideoElement | null>(null)
+  const dhRef = useRef<HTMLVideoElement | null>(null)
+  // Codes already handled (played / fallback-spoken / stale / discarded).
+  const handledDhRef = useRef(new Set<string>())
+  // When we started waiting for the current generation (code + timestamp).
+  const waitingDhRef = useRef<{ code: string; at: number } | null>(null)
+  // Segmented video playlist: pending absolute URLs, owner task code, played count.
+  const dhQueueRef = useRef<string[]>([])
+  const dhQueueCodeRef = useRef('')
+  const dhQueuePlayedRef = useRef(0)
   const dragRef = useRef<{ startX: number; startWidth: number; current: number } | null>(null)
 
   // Follow the shared companion visibility (the toggle flips it live).
@@ -138,6 +160,161 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
     }
   }, [speaking, taskIndex, taskVideos])
 
+  // Digital human: poll the bridge task state every 4 s and drive playback.
+  //  - done + no pending newer task -> play the video (it carries the TTS
+  //    audio muxed by DUIX, so video + voice start together, in sync)
+  //  - error / discarded / stale (newer task pending) -> never play
+  //  - error with no pending -> fall back to plain TTS so the reply is heard
+  //  - waiting too long (>90s) -> give up on the video, discard + speak TTS
+  useEffect(() => {
+    let cancelled = false
+    const poll = async () => {
+      const status = await dhStatus()
+      if (cancelled || status === null) return
+      setDh((prev) => {
+        if (prev === null) return status
+        if (
+          prev.state === status.state &&
+          prev.video_url === status.video_url &&
+          prev.progress === status.progress &&
+          prev.message === status.message
+        ) return prev
+        return status
+      })
+      driveDh(status)
+    }
+    void poll()
+    const timer = window.setInterval(poll, 4000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [])
+
+  const stopDh = useCallback(() => {
+    const vid = dhRef.current
+    if (vid !== null) {
+      vid.pause()
+      vid.currentTime = 0
+    }
+    setDhPlayingBoth(false)
+  }, [setDhPlayingBoth])
+
+  /** Play the next queued segment video (or stop when the playlist is done). */
+  const playNextDh = useCallback(() => {
+    const vid = dhRef.current
+    const next = dhQueueRef.current[dhQueuePlayedRef.current]
+    if (vid === null || next === undefined) {
+      setDhPlayingBoth(false)
+      return
+    }
+    vid.src = next
+    void vid.play().catch(() => {})
+    setDhPlayingBoth(true)
+  }, [setDhPlayingBoth])
+
+  const driveDh = (status: DhStatus): void => {
+    const code = status.code
+    if (!code) return
+    // 数字人开关关闭：不生成/不播放任何数字人视频
+    if (!readDigitalHuman()) {
+      dhQueueRef.current = []
+      stopDh()
+      return
+    }
+    // 新任务：重置播放队列（旧的未播视频作废）
+    if (code !== dhQueueCodeRef.current) {
+      dhQueueCodeRef.current = code
+      dhQueueRef.current = []
+      dhQueuePlayedRef.current = 0
+      handledDhRef.current.delete(code)
+      stopDh()
+    }
+    if (handledDhRef.current.has(code)) return
+    if (status.state === 'discarded') {
+      handledDhRef.current.add(code)
+      waitingDhRef.current = null
+      dhQueueRef.current = []
+      stopDh()
+      return
+    }
+    if (status.state === 'error' && status.pending === 0) {
+      handledDhRef.current.add(code)
+      waitingDhRef.current = null
+      dhQueueRef.current = []
+      stopDh()
+      if (status.text) {
+        void tts(status.text)
+          .then((wav) => speaker.speak(wav))
+          .catch((err) => console.error('[ui-voice] DH fallback TTS failed:', err))
+      }
+      return
+    }
+    if (status.state === 'tts' || status.state === 'generating') {
+      const now = Date.now()
+      if (waitingDhRef.current === null || waitingDhRef.current.code !== code) {
+        waitingDhRef.current = { code, at: now }
+      } else if (now - waitingDhRef.current.at > 90000) {
+        // Generation taking too long: stop waiting, speak the reply directly.
+        handledDhRef.current.add(code)
+        waitingDhRef.current = null
+        dhQueueRef.current = []
+        dhDiscard(code)
+        stopDh()
+        if (status.text) {
+          void tts(status.text)
+            .then((wav) => speaker.speak(wav))
+            .catch((err) => console.error('[ui-voice] DH timeout TTS failed:', err))
+        }
+        return
+      }
+    }
+    if (status.state === 'generating' || status.state === 'done') {
+      // 被更新的任务顶替：不再播放当前任务任何剩余视频
+      if (status.pending > 0) {
+        handledDhRef.current.add(code)
+        waitingDhRef.current = null
+        dhQueueRef.current = []
+        stopDh()
+        return
+      }
+      // 把新产出的小段视频追加进播放队列（去重），有位置就接着播
+      const base = bridgeBase()
+      for (const v of status.videos ?? []) {
+        const url = `${base}${v.video_url}`
+        if (!dhQueueRef.current.includes(url)) dhQueueRef.current.push(url)
+      }
+      if (status.state === 'done') {
+        handledDhRef.current.add(code)
+        waitingDhRef.current = null
+      }
+      if (!dhPlayingRef.current && dhQueuePlayedRef.current < dhQueueRef.current.length) {
+        playNextDh()
+      }
+    }
+  }
+
+  // A new reply takes over: stop the digital human video so its audio never
+  // overlaps the live TTS (a fresh reply generates its own video later).
+  useEffect(() => {
+    if (!speaking || !dhPlaying) return
+    const vid = dhRef.current
+    if (vid !== null) {
+      vid.pause()
+      vid.currentTime = 0
+    }
+    setDhPlayingBoth(false)
+  }, [speaking, dhPlaying, setDhPlayingBoth])
+
+  const onDhEnded = useCallback(() => {
+    dhQueuePlayedRef.current += 1
+    if (dhQueuePlayedRef.current < dhQueueRef.current.length) {
+      playNextDh() // 一段播完马上续接下一段
+    } else {
+      setDhPlayingBoth(false)
+    }
+  }, [playNextDh, setDhPlayingBoth])
+
   const onIdleEnded = useCallback(() => {
     if (bgVideos.length > 1) setBgIndex((i) => (i + 1) % bgVideos.length)
   }, [bgVideos.length])
@@ -190,7 +367,8 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
     })
   }, [])
 
-  if (!visible || (bgVideos.length === 0 && taskVideos.length === 0)) return null
+  const dhBusy = dh !== null && (dh.state === 'tts' || dh.state === 'generating')
+  if (!visible || (bgVideos.length === 0 && taskVideos.length === 0 && !dhPlaying && !dhBusy)) return null
 
   return (
     <div
@@ -199,10 +377,16 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
       aria-hidden="true"
     >
       {bgVideos.length > 0 && (
-        <video ref={idleRef} className={speaking ? `${css.video} ${css.hidden}` : css.video} muted playsInline preload="auto" onEnded={onIdleEnded} />
+        <video ref={idleRef} className={speaking || dhPlaying ? `${css.video} ${css.hidden}` : css.video} muted playsInline preload="auto" onEnded={onIdleEnded} />
       )}
+      <video ref={dhRef} className={dhPlaying ? css.video : `${css.video} ${css.hidden}`} playsInline preload="auto" onEnded={onDhEnded} />
       {taskVideos.length > 0 && (
         <video ref={speakRef} className={speaking ? css.video : `${css.video} ${css.hidden}`} muted playsInline preload="auto" onEnded={onSpeakEnded} />
+      )}
+      {dhBusy && readDigitalHuman() && (
+        <div className={css.dhCaption}>
+          {dh.state === 'tts' ? '语音合成中…' : dh.message || '数字人生成中…'}
+        </div>
       )}
       <div
         className={css.handle}

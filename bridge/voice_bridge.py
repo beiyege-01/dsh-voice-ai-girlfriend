@@ -25,19 +25,19 @@ import json
 import logging
 import os
 import threading
+import time
+from datetime import datetime
 from pathlib import Path
 
+import httpx
 import numpy as np
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from uuid import uuid4
 
 HERE = Path(__file__).resolve().parent
-# Repo root: this file lives in <repo>/bridge/, so relative paths in
-# bridge-config.json are resolved against the repo root (e.g. media dirs,
-# ref_audio.wav). Absolute paths pass through untouched.
-REPO_ROOT = HERE.parent
 CONFIG_PATH = HERE / "bridge-config.json"
 
 logging.basicConfig(
@@ -47,41 +47,9 @@ logging.basicConfig(
 logger = logging.getLogger("voice_bridge")
 
 
-def _resolve_path(value: str) -> str:
-    """Resolve a relative path against the repo root; absolute paths unchanged."""
-    path = Path(value)
-    if path.is_absolute():
-        return value
-    return str((REPO_ROOT / path).resolve())
-
-
 def load_config() -> dict:
-    """Load bridge-config.json and normalize relative paths.
-
-    Only TTS model / ref audio / media directories are resolved (they point
-    at local files). The STT model_name stays untouched — it is a HuggingFace
-    model id (e.g. openai/whisper-large-v3) and must NOT be path-resolved.
-    """
     with open(CONFIG_PATH, encoding="utf-8") as f:
-        cfg = json.load(f)
-
-    # FunASR STT model is a LOCAL directory in this repo (models/funasr/...)
-    # — resolve it relative to the repo root like the other paths.
-    if cfg.get("stt", {}).get("backend") == "funasr" and cfg["stt"].get("model_name"):
-        cfg["stt"]["model_name"] = _resolve_path(cfg["stt"]["model_name"])
-
-    tts = cfg.setdefault("tts", {})
-    if tts.get("model_name"):
-        tts["model_name"] = _resolve_path(tts["model_name"])
-    if tts.get("ref_audio"):
-        tts["ref_audio"] = _resolve_path(tts["ref_audio"])
-
-    media = cfg.setdefault("media", {})
-    for key in ("bg_images_dir", "task_videos_dir"):
-        if media.get(key):
-            media[key] = _resolve_path(media[key])
-
-    return cfg
+        return json.load(f)
 
 
 CONFIG = load_config()
@@ -434,6 +402,458 @@ if BG_IMAGES_DIR.is_dir():
     app.mount("/media/bg-images", StaticFiles(directory=str(BG_IMAGES_DIR)), name="media-bg")
 if TASK_VIDEOS_DIR.is_dir():
     app.mount("/media/task-videos", StaticFiles(directory=str(TASK_VIDEOS_DIR)), name="media-task")
+
+
+# ── 数字人 DUIX 集成 ────────────────────────────────────────────────────────
+#
+# 回复结束 → 插件调 /api/dh/speak {text} → 桥接用 Qwen3 TTS 整段合成 →
+# 写入共享卷 temp（宿主 D:\duix_avatar_data\face2face\temp = 容器 /code/data/temp）
+# → POST DUIX /easy/submit（audio_url=裸文件名, video_url=avatar.mp4）→
+# 轮询 /easy/query 直到 success → 最终视频 <uuid>-r.mp4 落在宿主 temp 下，
+# 容器已把 TTS 声音混入视频（ffmpeg -c:a aac），播放该 mp4 即音画同步。
+#
+# 约束：DUIX 单任务互斥（忙碌时 submit 返回 10001 busy）→ worker 串行处理；
+# 排队期间来了新回复则丢弃未开始的任务，只保留最新一条（对话中只有最后的
+# 回复值得生成视频）。query 查询成功/失败后任务即被服务端删除（一次性）。
+
+DH_CFG = CONFIG.get("digital_human", {})
+DH_ENABLED = bool(DH_CFG.get("enabled", False))
+DH_DUIX_BASE = DH_CFG.get("duix_base", "http://127.0.0.1:8383").rstrip("/")
+DH_DATA_DIR = Path(DH_CFG.get("data_dir", "D:/duix_avatar_data/face2face"))
+DH_TEMP_DIR = DH_DATA_DIR / DH_CFG.get("temp_dir", "temp")
+DH_AVATAR = DH_CFG.get("avatar_video", "avatar.mp4")
+DH_SUBMIT_RETRY_SEC = float(DH_CFG.get("submit_retry_sec", 5))
+DH_QUERY_INTERVAL = float(DH_CFG.get("query_interval_sec", 2))
+DH_QUERY_TIMEOUT = float(DH_CFG.get("query_timeout_sec", 240))
+DH_MAX_KEEP = int(DH_CFG.get("max_keep", 10))
+# 每段音频的文本上限：~48 字 ≈ 8~10s 音频（用户实测 10s 视频十几秒出片）
+DH_SEGMENT_CHARS = int(DH_CFG.get("segment_chars", 48))
+DH_MAX_TEXT = 1000
+
+# 生成的成品视频保留策略：磁盘上最多保留最近 max_keep 个 <uuid>-r.mp4，
+# 超出删除最旧的（不碰 avatar.mp4 / 输入音频 / 形象底版）。
+# 内存里存一份最近完成任务的 {code,file,url,text,time} 供 /api/dh/history 回放。
+_dh_history: list[dict] = []
+
+
+def _dh_prune_videos() -> None:
+    """把 temp 下的成品视频修剪到最近 max_keep 个（新的在前，删旧的）。"""
+    if not DH_TEMP_DIR.is_dir():
+        return
+    files = sorted(
+        (p for p in DH_TEMP_DIR.glob("*-r.mp4") if p.is_file()),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    for old in files[DH_MAX_KEEP:]:
+        try:
+            old.unlink()
+            logger.info("DH prune: deleted old result %s", old.name)
+        except Exception:  # noqa: BLE001
+            logger.exception("DH prune failed on %s", old)
+
+
+def _dh_record_history(code: str, video_file: str, text: str) -> None:
+    """把刚完成的视频记入内存历史（新→旧，最多 max_keep 条）。"""
+    with _dh_lock:
+        _dh_history.insert(
+            0,
+            {
+                "code": code,
+                "video_file": video_file,
+                "video_url": f"/media/dh/{video_file}",
+                "text": text,
+                "created_at": time.time(),
+            },
+        )
+        del _dh_history[DH_MAX_KEEP:]
+
+_dh_state: dict = {
+    "enabled": DH_ENABLED,
+    "state": "idle",       # idle | tts | generating | done | error | discarded
+    "message": "",
+    "progress": 0,
+    "video_file": "",      # 最近一段成品文件名（temp 下）
+    "video_url": "",       # 最近一段成品媒体 URL（桥接 /media/dh/<file>）
+    "videos": [],          # 本回复已产出的小段视频列表 [{video_file, video_url}]
+    "total_segments": 0,   # 本回复总段数
+    "done_segments": 0,    # 已产出段数
+    "code": "",            # 当前（或最近完成）任务的 code
+    "text": "",            # 当前（或最近完成）任务的回复文本
+    "pending": 0,          # 排队中（未开始）的任务数
+    "updated_at": 0.0,
+}
+_dh_lock = threading.Lock()
+_dh_queue: list[dict] = []  # {code, text, started}
+_dh_discarded: set[str] = set()  # 已作废（打断/超时）的任务 code
+
+
+def _dh_set(**kw) -> None:
+    with _dh_lock:
+        _dh_state.update(kw)
+        _dh_state["updated_at"] = time.time()
+
+
+def _dh_get() -> dict:
+    with _dh_lock:
+        state = dict(_dh_state)
+        state["pending"] = sum(1 for t in _dh_queue if not t["started"])
+        return state
+
+
+def _dh_pop_next() -> dict | None:
+    """取下一个未开始的任务；已处理的清理掉，未开始的只保留最新一条。"""
+    with _dh_lock:
+        _dh_queue[:] = [t for t in _dh_queue if not t["started"]]
+        if not _dh_queue:
+            return None
+        _dh_queue[:] = _dh_queue[-1:]
+        item = _dh_queue[0]
+        item["started"] = True
+        return item
+
+
+class DHSpeakRequest(BaseModel):
+    text: str
+
+
+@app.post("/api/dh/speak")
+async def dh_speak(req: DHSpeakRequest) -> dict:
+    """提交一段回复文本，生成数字人口播视频（后台排队，最新替换未开始任务）。"""
+    if not DH_ENABLED:
+        raise HTTPException(status_code=400, detail="digital_human disabled in bridge-config.json")
+    text = (req.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Empty text")
+    if len(text) > DH_MAX_TEXT:
+        logger.warning("DH text truncated from %d to %d chars", len(text), DH_MAX_TEXT)
+        text = text[:DH_MAX_TEXT]
+    code = str(uuid4())
+    with _dh_lock:
+        # 只保留正在运行的任务，未开始的旧排队任务被最新提交替换
+        _dh_queue[:] = [t for t in _dh_queue if t["started"]]
+        _dh_queue.append({"code": code, "text": text, "started": False})
+        pending = sum(1 for t in _dh_queue if not t["started"])
+    logger.info("DH enqueue: %s (%d chars), pending=%d", code, len(text), pending)
+    return {"ok": True, "code": code}
+
+
+class DHDiscardRequest(BaseModel):
+    code: str
+
+
+@app.post("/api/dh/discard")
+async def dh_discard(req: DHDiscardRequest) -> dict:
+    """作废一个已提交的数字人任务（用户打断/放弃该回复）：结果不再播放。"""
+    code = (req.code or "").strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="Empty code")
+    with _dh_lock:
+        _dh_discarded.add(code)
+        # 若它还在排队，直接移除
+        _dh_queue[:] = [t for t in _dh_queue if t.get("code") != code]
+    logger.info("DH discard: %s", code)
+    return {"ok": True}
+
+
+@app.get("/api/dh/status")
+async def dh_status() -> dict:
+    """数字人任务状态：插件轮询；done 时带 video_url。"""
+    return _dh_get()
+
+
+@app.get("/api/dh/history")
+async def dh_history() -> dict:
+    """最近保留的成品视频列表（新→旧，最多 max_keep 条），供回放/查看。"""
+    videos = []
+    with _dh_lock:
+        for entry in _dh_history:
+            videos.append(dict(entry))
+    if not videos and DH_TEMP_DIR.is_dir():
+        # 进程重启后从磁盘重建
+        files = sorted(
+            (p for p in DH_TEMP_DIR.glob("*-r.mp4") if p.is_file()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )[:DH_MAX_KEEP]
+        videos = [
+            {
+                "code": "",
+                "video_file": p.name,
+                "video_url": f"/media/dh/{p.name}",
+                "text": "",
+                "created_at": p.stat().st_mtime,
+            }
+            for p in files
+        ]
+    return {"videos": videos, "max_keep": DH_MAX_KEEP}
+
+
+def _split_segments(text: str, max_len: int = 48) -> list[str]:
+    """把文本切成 <= max_len 字的段（每段 ≈8~10s 音频）。
+
+    优先在句读标点后断；超长无标点的句子按 max_len 硬切，硬切点尽量落在
+    附近的断点字符（逗号/空格/冒号等）上，避免把词劈成两半。
+    """
+    import re
+
+    parts = re.split(r"(?<=[。！？!?；;，,])", text)
+    out: list[str] = []
+    cur = ""
+    for part in parts:
+        if not part:
+            continue
+        while len(part) > max_len:
+            head = part[:max_len]
+            pos = max((head.rfind(c) for c in "，。！？、：；,.;: "))
+            if pos > 0:
+                cut = pos + 1
+            else:
+                cut = max_len
+            out.append(head[:cut].strip() or head[:max_len])
+            part = part[cut:] if pos > 0 else part[max_len:]
+        if cur and len(cur) + len(part) > max_len:
+            out.append(cur)
+            cur = part
+        else:
+            cur += part
+    if cur:
+        out.append(cur)
+    return [s.strip() for s in out if s.strip()]
+
+
+def _synthesize_full(handler, text: str) -> np.ndarray:
+    """整段回复 TTS：超长文本分块合成后拼接为一条连续 int16 音频。"""
+    from speech_to_speech.pipeline.messages import TTSInput
+
+    chunks: list[np.ndarray] = []
+    for part in _split_segments(text, 400):
+        for chunk in handler.process(TTSInput(text=part, language_code="zh")):
+            if isinstance(chunk, bytes):
+                chunks.append(np.frombuffer(chunk, dtype=np.int16))
+            else:
+                chunks.append(np.asarray(chunk, dtype=np.int16))
+    if not chunks:
+        raise RuntimeError("DH TTS produced no audio")
+    return np.concatenate(chunks)
+
+
+async def _dh_submit(client: httpx.AsyncClient, payload: dict) -> dict:
+    resp = await client.post(f"{DH_DUIX_BASE}/easy/submit", json=payload)
+    resp.raise_for_status()
+    return resp.json()
+
+
+async def _dh_query(client: httpx.AsyncClient, code: str) -> dict | None:
+    resp = await client.get(f"{DH_DUIX_BASE}/easy/query", params={"code": code})
+    resp.raise_for_status()
+    body = resp.json()
+    if body.get("code") == 10004:  # 任务不存在（可能刚提交或已被消费）
+        return None
+    return body.get("data") or {}
+
+
+async def _dh_run(item: dict) -> None:
+    """处理一个数字人回复：切成 <=10s 的小段 → 逐段 TTS + 提交 DUIX。
+
+    流水线：当前段在 DUIX 生成期间，后台预合成下一段的 TTS 音频；DUIX
+    一空闲立即提交下一段。各段成品视频按顺序收进 status.videos，插件端
+    逐个续接播放（一段播完马上接下一段）。段太长时 DUIX 单任务排队。
+    """
+    code, text = item["code"], item["text"]
+    segments = [s for s in _split_segments(text, DH_SEGMENT_CHARS) if s]
+    if not segments:
+        _dh_set(state="error", message="文本为空", code=code, text=text)
+        return
+    total = len(segments)
+    try:
+        _dh_set(
+            state="tts", message="语音合成中…", code=code, text=text,
+            video_file="", video_url="", videos=[], total_segments=total,
+            done_segments=0, progress=0,
+        )
+        async with httpx.AsyncClient(timeout=20) as client:
+            pending_synth: asyncio.Task | None = None
+            for i, seg_text in enumerate(segments):
+                if code in _dh_discarded:
+                    _dh_set(state="discarded", message="已取消（被打断）", progress=0, code=code, text=text, videos=[])
+                    logger.info("DH %s: discarded before segment %d", code, i)
+                    return
+                _dh_set(
+                    state="generating",
+                    message=f"数字人生成中 {i + 1}/{total}…",
+                    code=code, text=text, done_segments=i,
+                    progress=round(i / total * 100),
+                )
+                # 当前段音频：优先用流水线预合成好的；否则现合成
+                if pending_synth is not None:
+                    wav_path = await pending_synth
+                    pending_synth = None
+                else:
+                    wav_path = await _dh_synth_segment(seg_text)
+                # 预合成下一段（当前段在 DUIX 生成期间并行跑）
+                next_synth: asyncio.Task | None = None
+                if i + 1 < total:
+                    next_synth = asyncio.create_task(_dh_synth_segment(segments[i + 1]))
+                # 提交 + 轮询当前段，拿到成品文件名
+                seg_code = f"{code}-s{i}"
+                fname = await _dh_submit_and_wait(client, seg_code, wav_path, code, text)
+                if fname is None:
+                    if next_synth is not None:
+                        next_synth.cancel()
+                    if code in _dh_discarded:
+                        _dh_set(state="discarded", message="已取消（被打断）", progress=0, code=code, text=text, videos=[])
+                    return  # 错误/超时状态已由 _dh_submit_and_wait 设置
+                with _dh_lock:
+                    videos = _dh_state.get("videos", [])
+                    videos = videos + [{"video_file": fname, "video_url": f"/media/dh/{fname}"}]
+                    _dh_state["videos"] = videos
+                _dh_record_history(seg_code, fname, seg_text)
+                if next_synth is not None:
+                    try:
+                        await next_synth
+                    except Exception:  # noqa: BLE001
+                        logger.exception("DH %s: next synth failed", code)
+                _dh_set(
+                    state="generating",
+                    message=f"数字人生成中 {i + 2}/{total}…",
+                    code=code, text=text, done_segments=i + 1,
+                    progress=round((i + 1) / total * 100),
+                )
+            # 全部段落完成
+            with _dh_lock:
+                videos = list(_dh_state.get("videos", []))
+            first = videos[0] if videos else {}
+            _dh_set(
+                state="done", message="数字人视频已就绪", progress=100,
+                video_file=first.get("video_file", ""),
+                video_url=first.get("video_url", ""),
+                code=code, text=text, total_segments=total, done_segments=total,
+            )
+            _dh_prune_videos()
+            logger.info(
+                "DH %s: done, %d segment(s): %s",
+                code, total, [v["video_file"] for v in videos],
+            )
+    except Exception as exc:  # noqa: BLE001 - surfaced to the plugin
+        logger.exception("DH %s: task failed", code)
+        if code in _dh_discarded:
+            _dh_set(state="discarded", message="已取消（被打断）", progress=0, code=code, text=text, videos=[])
+        else:
+            _dh_set(state="error", message=f"任务异常: {type(exc).__name__}", code=code, text=text)
+
+
+async def _dh_synth_segment(seg_text: str) -> Path:
+    """合成一小段音频到 temp 目录，返回宿主路径。"""
+    async with models.infer_lock:
+        handler = await models.ensure_tts()
+        samples = await asyncio.to_thread(_synthesize_full, handler, seg_text)
+    ts = datetime.now().strftime("%Y%m%d%H%M%S%f")[:-3]
+    wav_path = DH_TEMP_DIR / f"{ts}.wav"
+    wav_path.write_bytes(_pcm16_to_wav(samples))
+    logger.info("DH synth: %.2fs audio -> %s", len(samples) / 16000.0, wav_path.name)
+    return wav_path
+
+
+async def _dh_submit_and_wait(
+    client: httpx.AsyncClient,
+    seg_code: str,
+    wav_path: Path,
+    reply_code: str,
+    reply_text: str,
+) -> str | None:
+    """提交一段到 DUIX 并轮询到成品视频；返回文件名，失败返回 None。
+
+    状态已设置（error/超时）时返回 None，由调用方收尾。DUIX Status 是数字
+    枚举：1=处理中（带进度 msg）、2=任务完成（带 result）、3=失败（推测）；
+    同时兼容字符串 "s"/"e"/"r"/"success"/...。
+    """
+    payload = {
+        "code": seg_code,
+        "audio_url": wav_path.name,
+        "video_url": DH_AVATAR,
+        "watermark_switch": 0,
+        "digital_auth": 0,
+        "chaofen": 0,
+        "pn": 1,
+    }
+    submitted = False
+    for _ in range(180):  # 最多等 15 分钟 busy 释放
+        try:
+            resp = await _dh_submit(client, payload)
+        except Exception:  # noqa: BLE001
+            logger.exception("DH %s: submit http failed", seg_code)
+            await asyncio.sleep(DH_SUBMIT_RETRY_SEC)
+            continue
+        if resp.get("code") == 10000:
+            submitted = True
+            break
+        if resp.get("code") == 10001:  # busy
+            await asyncio.sleep(DH_SUBMIT_RETRY_SEC)
+            continue
+        _dh_set(state="error", message=f"提交失败: {resp.get('msg')}", code=reply_code, text=reply_text)
+        return None
+    if not submitted:
+        _dh_set(state="error", message="提交超时（DUIX 持续忙碌）", code=reply_code, text=reply_text)
+        return None
+
+    deadline = time.time() + DH_QUERY_TIMEOUT
+    while time.time() < deadline:
+        await asyncio.sleep(DH_QUERY_INTERVAL)
+        q = await _dh_query(client, seg_code)
+        if q is None:
+            continue
+        status = str(q.get("status"))
+        if status in ("2", "success", "s", "done", "finished", "成功"):
+            fname = str(q.get("result") or "").rsplit("/", 1)[-1]
+            host = DH_TEMP_DIR / fname
+            for _ in range(15):  # 等文件落盘（最多 15s）
+                if host.is_file():
+                    break
+                await asyncio.sleep(1)
+            logger.info("DH %s: segment done -> %s", seg_code, fname)
+            return fname
+        if status in ("3", "error", "e", "failed", "失败"):
+            _dh_set(state="error", message=f"生成失败: {q.get('msg')}", code=reply_code, text=reply_text)
+            return None
+        # 1 / run / 未知：生成中的中间状态绝不误判失败；带 result 时视为成功
+        if status not in ("1", "run", "r", "running", "运行") and q.get("result"):
+            fname = str(q.get("result")).rsplit("/", 1)[-1]
+            if (DH_TEMP_DIR / fname).is_file():
+                logger.info("DH %s: segment done (result field) -> %s", seg_code, fname)
+                return fname
+    _dh_set(state="error", message="生成超时", code=reply_code, text=reply_text)
+    return None
+
+
+async def _dh_worker() -> None:
+    """后台队列 worker：串行消费 /api/dh/speak 提交的任务。
+
+    完成后保留 done/error/discarded 状态（含 video_url），供插件取用；
+    新任务开始时才清空旧结果（见 _dh_run 开头）。"""
+    while True:
+        item = _dh_pop_next()
+        if item is None:
+            await asyncio.sleep(1.0)
+            continue
+        try:
+            await _dh_run(item)
+        except Exception:  # noqa: BLE001
+            logger.exception("DH worker crashed on %s", item.get("code"))
+            _dh_set(state="error", message="worker 异常", code=item.get("code", ""), text=item.get("text", ""))
+
+
+@app.on_event("startup")
+async def _dh_start_worker() -> None:
+    if DH_ENABLED:
+        _dh_prune_videos()  # 启动时把成品视频修剪到最近 max_keep 个
+        asyncio.create_task(_dh_worker())
+        logger.info("DH worker started (DUIX %s, temp=%s, avatar=%s, max_keep=%d)", DH_DUIX_BASE, DH_TEMP_DIR, DH_AVATAR, DH_MAX_KEEP)
+
+
+# 结果视频静态挂载：插件 video 元素直接播 /media/dh/<uuid>-r.mp4（Range 支持）。
+if DH_ENABLED and DH_TEMP_DIR.is_dir():
+    app.mount("/media/dh", StaticFiles(directory=str(DH_TEMP_DIR)), name="media-dh")
 
 
 # ── QQ 推送（NapCat OneBot）───────────────────────────────────────────────
