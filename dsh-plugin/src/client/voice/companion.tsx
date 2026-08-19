@@ -270,14 +270,9 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
       }
     }
     if (status.state === 'generating' || status.state === 'done') {
-      // 被更新的任务顶替：不再播放当前任务任何剩余视频
-      if (status.pending > 0) {
-        handledDhRef.current.add(code)
-        waitingDhRef.current = null
-        dhQueueRef.current = []
-        stopDh()
-        return
-      }
+      // 注意：不因 pending>0 跳过播放——连续对话里排队几乎是常态，跳过会
+      // 导致"生成了却不播"。当前任务该播就播；更晚的任务真正开始时
+      // （code 变化）会重置播放队列并接管。
       // 把新产出的小段视频追加进播放队列（去重），有位置就接着播
       const base = bridgeBase()
       for (const v of status.videos ?? []) {
