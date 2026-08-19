@@ -877,6 +877,49 @@ if DH_ENABLED and DH_TEMP_DIR.is_dir():
     app.mount("/media/dh", StaticFiles(directory=str(DH_TEMP_DIR)), name="media-dh")
 
 
+# ── DeepSeek 余额（低开销：10 分钟内存缓存，挂载/点击才查）────────────────────
+#
+# 调官方 GET https://api.deepseek.com/user/balance（Bearer 鉴权），返回
+# CNY/USD 总余额 + 赠金 + 充值。key 来源：bridge-config.json 的
+# deepseek.api_key 优先，否则环境变量 DEEPSEEK_API_KEY。缓存期内重复请求
+# 不再打官方接口，日常零轮询、零开销。
+
+_balance_cache: dict = {"data": None, "at": 0.0}
+BALANCE_CACHE_SEC = 600
+
+
+@app.get("/api/balance")
+async def api_balance() -> dict:
+    now = time.time()
+    if _balance_cache["data"] is not None and now - _balance_cache["at"] < BALANCE_CACHE_SEC:
+        cached = dict(_balance_cache["data"])
+        cached["cached"] = True
+        return cached
+    key = (CONFIG.get("deepseek") or {}).get("api_key") or os.environ.get("DEEPSEEK_API_KEY", "")
+    if not key:
+        raise HTTPException(status_code=503, detail="DEEPSEEK_API_KEY not configured (bridge-config deepseek.api_key or env)")
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                "https://api.deepseek.com/user/balance",
+                headers={"Authorization": f"Bearer {key}"},
+            )
+            resp.raise_for_status()
+            body = resp.json()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("balance query failed: %s", exc)
+        raise HTTPException(status_code=502, detail=f"DeepSeek balance query failed: {exc}") from exc
+    result = {
+        "is_available": body.get("is_available"),
+        "balance_infos": body.get("balance_infos", []),
+        "cached": False,
+        "at": now,
+    }
+    _balance_cache["data"] = result
+    _balance_cache["at"] = now
+    return result
+
+
 # ── QQ 推送（NapCat OneBot）───────────────────────────────────────────────
 #
 # Sends text and TTS voice to a target QQ via a local NapCat OneBot v11 HTTP

@@ -136,6 +136,7 @@ cd deepseek-harness
 pnpm install
 ```
 
+> ✅ **已适配 DSH rc.8（当前主线）**：插件协议（`dsh.bundle` manifest + `conversation.input.dock/left` 槽位）按 rc.8 实现，升级到 rc.8 后无需改动即可运行；余额统计走 `conversation.composer.dock` + ui-conversation 的 stats-extras 扩展点（`registerStatsExtra`）。
 > `pnpm install` 会装几十秒到几分钟。装完后这个文件夹先放着，后面"安装 DSH 语音插件"步骤要用。
 > 记住它的路径（比如 `C:\dev\deepseek-harness`），后面一键启动要用。
 

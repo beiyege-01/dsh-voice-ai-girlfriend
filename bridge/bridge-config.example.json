@@ -35,6 +35,9 @@
     "bg_images_dir": "assets/bg-images",
     "task_videos_dir": "assets/task-videos"
   },
+  "deepseek": {
+    "api_key": "可选：DeepSeek API key（余额 badge 用）。不填则读环境变量 DEEPSEEK_API_KEY"
+  },
   "qq": {
     "enabled": false,
     "napcat_base": "http://127.0.0.1:3000",
