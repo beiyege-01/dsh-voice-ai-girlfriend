@@ -131,15 +131,16 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
   useEffect(() => {
     if (!voiceEnabled()) return
 
-    // Resolve DH mode once: bridge config + companion window visible + toggle on.
+    // Resolve the bridge DH availability once (config doesn't change at runtime);
+    // companion visibility + the digital-human toggle are RE-CHECKED every
+    // render so flipping the toggle mid-session takes effect immediately:
+    // turning the toggle OFF falls back to the near-instant sentence TTS.
     if (dhModeRef.current === null) {
       void dhStatus().then((s) => {
-        if (s !== null) {
-          dhModeRef.current = s.enabled === true && companionVisible() && readDigitalHuman()
-        }
+        if (s !== null) dhModeRef.current = s.enabled === true
       })
     }
-    const dhMode = dhModeRef.current === true
+    const dhMode = dhModeRef.current === true && companionVisible() && readDigitalHuman()
 
     // Barge-in swallowed the CURRENT reply: remember its exact anchor so only
     // that reply's remaining sentences are skipped; replies that appear
