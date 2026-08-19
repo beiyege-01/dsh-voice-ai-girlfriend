@@ -44,32 +44,15 @@ function nodeText(data: AssistantChatData): string {
 }
 
 /**
- * Whether an assistant node is a plain chat reply: the nearest PRECEDING
- * non-assistant node must be a USER node. Replies following a tool-call are
- * agent working output and never get voiced to QQ.
- */
-function isChatReply(
-  snapshot: { chat: { nodes: { values(): readonly { kind: string; anchorSeq: number }[] } } },
-  anchor: number,
-): boolean {
-  let nearestSeq = -1
-  let nearestKind = ''
-  for (const node of snapshot.chat.nodes.values()) {
-    if (node.kind === 'assistant-step') continue
-    if (node.anchorSeq < anchor && node.anchorSeq > nearestSeq) {
-      nearestSeq = node.anchorSeq
-      nearestKind = node.kind
-    }
-  }
-  return nearestKind === 'user'
-}
-
-/**
  * @param props - framework runtime + locale + injected sendText.
  */
 export const QQBridge = memo(function QQBridge({ useSession, sendText }: QQBridgeProps) {
   const wsRef = useRef<WebSocket | null>(null)
   const lastReplyAnchorRef = useRef(0)
+  // Last-segment debounce per user turn (see reply-listener): only a turn
+  // that stays quiet for LAST_DEBOUNCE_MS submits its final segment.
+  const qqLastDebounceRef = useRef(new Map<number, { timer: ReturnType<typeof setTimeout>; anchor: number }>())
+  const LAST_DEBOUNCE_MS = 4000
   const snapshot = useSession(s => s)
 
   // WS connect with auto-reconnect (3s). Only one tab should run this (the
@@ -105,36 +88,73 @@ export const QQBridge = memo(function QQBridge({ useSession, sendText }: QQBridg
     }
   }, [sendText])
 
-  // New settled assistant reply -> push text to the bridge (it voices it to QQ).
-  // Skips entirely when the QQ push toggle is off. Only plain chat replies
-  // (nearest preceding non-assistant node is a USER node) reach QQ — agent
-  // working output (after tool-calls) is never voiced.
+  // New settled assistant replies -> push text to the bridge (it voices them
+  // to QQ). Skips entirely when the QQ push toggle is off. Per USER turn,
+  // deliver only the FIRST and the LAST settled assistant texts: the first
+  // goes immediately, the last after a 4s quiet debounce (an intermediate
+  // text never reaches QQ because a newer settled text keeps resetting the
+  // timer). Agent tool-call chatter between A and B is never voiced.
   useEffect(() => {
     if (!readQqPush()) return
-    let maxAnchor = 0
-    let newest: { anchor: number; text: string } | null = null
+    const userAnchors: number[] = []
+    for (const node of snapshot.chat.nodes.values()) {
+      if (node.kind === 'user') userAnchors.push(node.anchorSeq)
+    }
+    userAnchors.sort((a, b) => a - b)
+    type TurnPick = { anchor: number; text: string }
+    const perUserTurn = new Map<number, { first: TurnPick; last: TurnPick }>()
     for (const node of snapshot.chat.nodes.values()) {
       if (node.kind !== 'assistant-step') continue
       const data = assistantData(node)
       if (data === undefined || data.status !== 'settled') continue
-      if (node.anchorSeq > maxAnchor) {
-        maxAnchor = node.anchorSeq
-        newest = { anchor: node.anchorSeq, text: cleanReplyText(nodeText(data), 100000) }
+      const text = cleanReplyText(nodeText(data), 100000).trim()
+      if (text.length < 2) continue
+      let ua = -1
+      for (const u of userAnchors) {
+        if (u < node.anchorSeq) ua = u
+        else break
+      }
+      const pick: TurnPick = { anchor: node.anchorSeq, text }
+      const slot = perUserTurn.get(ua)
+      if (slot === undefined) {
+        perUserTurn.set(ua, { first: pick, last: pick })
+      } else {
+        if (node.anchorSeq < slot.first.anchor) slot.first = pick
+        if (node.anchorSeq > slot.last.anchor) slot.last = pick
       }
     }
-    if (newest === null) return
-    if (!isChatReply(snapshot, newest.anchor)) return // agent working output — no QQ voice
-    if (newest.anchor > lastReplyAnchorRef.current) {
-      lastReplyAnchorRef.current = newest.anchor
-      const text = newest.text.trim()
-      if (text !== '') {
-        const ws = wsRef.current
-        if (ws !== null && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'reply', text }))
+    const ws = wsRef.current
+    const open = ws !== null && ws.readyState === WebSocket.OPEN
+    const sendQq = (pick: TurnPick): void => {
+      if (pick.anchor <= lastReplyAnchorRef.current) return
+      lastReplyAnchorRef.current = pick.anchor
+      if (open) ws.send(JSON.stringify({ type: 'reply', text: pick.text }))
+    }
+    for (const [ua, { first, last }] of perUserTurn) {
+      sendQq(first)
+      if (first.anchor === last.anchor) {
+        const existing = qqLastDebounceRef.current.get(ua)
+        if (existing !== undefined) {
+          clearTimeout(existing.timer)
+          qqLastDebounceRef.current.delete(ua)
         }
+        continue
       }
+      const existing = qqLastDebounceRef.current.get(ua)
+      if (existing !== undefined) clearTimeout(existing.timer)
+      const timer = setTimeout(() => {
+        qqLastDebounceRef.current.delete(ua)
+        sendQq(last)
+      }, LAST_DEBOUNCE_MS)
+      qqLastDebounceRef.current.set(ua, { timer, anchor: last.anchor })
     }
   }, [snapshot])
+
+  // Unmount: clear QQ debounce timers.
+  useEffect(() => () => {
+    for (const { timer } of qqLastDebounceRef.current.values()) clearTimeout(timer)
+    qqLastDebounceRef.current.clear()
+  }, [])
 
   return null
 })

@@ -58,28 +58,6 @@ function nodeText(data: AssistantChatData): string {
     .join('\n')
 }
 
-/**
- * Whether an assistant node is a plain chat reply (as opposed to agent
- * working output): the nearest PRECEDING non-assistant node must be a USER
- * node. A reply that follows a tool-call (or steering/context) is agent
- * tooling noise — it should never feed DUIX/QQ voice.
- */
-function isChatReply(
-  snapshot: { chat: { nodes: { values(): readonly { kind: string; anchorSeq: number }[] } } },
-  anchor: number,
-): boolean {
-  let nearestSeq = -1
-  let nearestKind = ''
-  for (const node of snapshot.chat.nodes.values()) {
-    if (node.kind === 'assistant-step') continue
-    if (node.anchorSeq < anchor && node.anchorSeq > nearestSeq) {
-      nearestSeq = node.anchorSeq
-      nearestKind = node.kind
-    }
-  }
-  return nearestKind === 'user'
-}
-
 /** Full props: framework runtime share + `voice` locale seat + injected face. */
 export type ReplySpeakerMountProps =
   PropsRuntime<'conversation.input.left'> & PropsLocale<'voice'> & VoiceInjected
@@ -121,6 +99,12 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
   const skipUntilRef = useRef(0)
   // Digital-human: nodes whose finished reply was already handed to the bridge.
   const dhSentRef = useRef(new Set<string>())
+  // Last-segment debounce per user turn: while a turn is still streaming, new
+  // settled texts keep replacing the "last" candidate; only once no new text
+  // arrives for LAST_DEBOUNCE_MS is the candidate confirmed and submitted.
+  // key = user anchor, value = { timer, anchor } (the candidate's anchor).
+  const dhLastDebounceRef = useRef(new Map<number, { timer: ReturnType<typeof setTimeout>; anchor: number }>())
+  const LAST_DEBOUNCE_MS = 4000
   // DH mode (wait-for-video instead of immediate TTS): resolved once from the
   // bridge status (`enabled` + companion visible). null = not resolved yet.
   const dhModeRef = useRef<boolean | null>(null)
@@ -145,10 +129,12 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
     return () => _registerInterruptHandler(null)
   }, [_registerInterruptHandler])
 
-  // Unmount: stop playback and release any in-flight TTS.
+  // Unmount: stop playback, release any in-flight TTS, clear DH debounce timers.
   useEffect(() => () => {
     speaker.stop()
     _registerTtsAbort(null)
+    for (const { timer } of dhLastDebounceRef.current.values()) clearTimeout(timer)
+    dhLastDebounceRef.current.clear()
   }, [speaker, _registerTtsAbort])
 
   // Stream new complete sentences to TTS on every snapshot change. In digital
@@ -228,41 +214,78 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
           dhDiscard(lastDhCodeRef.current)
         }
       }
-      // Submit each settled, fully-streamed reply's full text to the bridge.
+      // Submit settled, fully-streamed replies' full text to the bridge.
       // No sentence TTS here — the video carries the audio; the companion
       // window plays it (TTS + talking-head together) when generation ends.
-      // Per-turn closing only: a turn may carry many assistant steps (agent
-      // tool-call intermediates, reasoning, interim text). Only the turn's
-      // LAST settled assistant node is a finished reply for the human — the
-      // earlier steps are working noise that would flood the DUIX queue
-      // (one video per tool call) and starve the real reply.
-      // A reply is a plain chat reply (feeds DUIX) only when the nearest
-      // preceding non-assistant node is a USER node — replies that follow a
-      // tool-call are agent working output, not chat, and never spawn a video.
-      const perTurnClosing = new Map<number, { node: { key: string; anchorSeq: number }; data: AssistantChatData; anchor: number }>()
+      // Per USER turn, deliver only the FIRST and the LAST settled assistant
+      // texts. A user turn spans one user node to the next; an agent reply
+      // (first answer A -> tool call -> final answer B) is ONE user turn, so
+      // both A and B are spoken, while every intermediate text — tool-call
+      // output, transitional chatter, mid-work updates — never spawns a video.
+      // (Pure chat turns have first === last and deliver once.)
+      const userAnchors: number[] = []
+      for (const node of snapshot.chat.nodes.values()) {
+        if (node.kind === 'user') userAnchors.push(node.anchorSeq)
+      }
+      userAnchors.sort((a, b) => a - b)
+      type TurnPick = { node: { key: string; anchorSeq: number }; data: AssistantChatData; anchor: number }
+      const perUserTurn = new Map<number, { first: TurnPick; last: TurnPick }>()
       for (const node of snapshot.chat.nodes.values()) {
         if (node.kind !== 'assistant-step') continue
         const data = assistantData(node)
         if (data === undefined || data.status !== 'settled') continue
         const text = cleanReplyText(nodeText(data), 100000)
         if (text.trim().length < 2) continue
-        const cur = perTurnClosing.get(data.turn)
-        if (cur === undefined || node.anchorSeq > cur.anchor) {
-          perTurnClosing.set(data.turn, { node, data, anchor: node.anchorSeq })
+        // The user turn this reply belongs to = nearest preceding user anchor.
+        let ua = -1
+        for (const u of userAnchors) {
+          if (u < node.anchorSeq) ua = u
+          else break
+        }
+        const pick: TurnPick = { node, data, anchor: node.anchorSeq }
+        const slot = perUserTurn.get(ua)
+        if (slot === undefined) {
+          perUserTurn.set(ua, { first: pick, last: pick })
+        } else {
+          if (node.anchorSeq < slot.first.anchor) slot.first = pick
+          if (node.anchorSeq > slot.last.anchor) slot.last = pick
         }
       }
-      for (const { node, data } of perTurnClosing.values()) {
-        if (!isChatReply(snapshot, node.anchorSeq)) continue // agent working output
-        if (node.anchorSeq <= baselineRef.current) continue
-        if (node.anchorSeq === skipAnchorRef.current) continue
-        if (dhSentRef.current.has(node.key)) continue
-        const text = cleanReplyText(nodeText(data), 100000)
-        if (text.trim().length < 2) continue
-        dhSentRef.current.add(node.key)
-        lastDhReplyAnchorRef.current = node.anchorSeq
+      const submitDh = (pick: TurnPick): void => {
+        const base = baselineRef.current
+        if (base !== null && pick.anchor <= base) return
+        if (pick.anchor === skipAnchorRef.current) return
+        if (dhSentRef.current.has(pick.node.key)) return
+        const text = cleanReplyText(nodeText(pick.data), 100000)
+        if (text.trim().length < 2) return
+        dhSentRef.current.add(pick.node.key)
+        lastDhReplyAnchorRef.current = pick.anchor
         void dhSpeak(text).then((code) => {
           if (code !== null) lastDhCodeRef.current = code
         })
+      }
+      for (const [ua, { first, last }] of perUserTurn) {
+        // FIRST segment: submit immediately (it is settled and will not change).
+        submitDh(first)
+        if (first.node.key === last.node.key) {
+          // Pure chat turn (no tool-call churn): first === last, nothing else.
+          const existing = dhLastDebounceRef.current.get(ua)
+          if (existing !== undefined) {
+            clearTimeout(existing.timer)
+            dhLastDebounceRef.current.delete(ua)
+          }
+          continue
+        }
+        // LAST segment: debounce — replace the candidate (reset the timer) on
+        // every new settled text so an intermediate text never gets submitted;
+        // only a 4s-quiet turn submits its final segment.
+        const existing = dhLastDebounceRef.current.get(ua)
+        if (existing !== undefined) clearTimeout(existing.timer)
+        const timer = setTimeout(() => {
+          dhLastDebounceRef.current.delete(ua)
+          submitDh(last)
+        }, LAST_DEBOUNCE_MS)
+        dhLastDebounceRef.current.set(ua, { timer, anchor: last.anchor })
       }
       return
     }
