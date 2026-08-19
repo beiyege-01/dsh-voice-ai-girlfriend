@@ -1,0 +1,42 @@
+# DUIX 数字人引擎 · Docker Compose（适配 RTX 50 系列，已精简）
+#
+# 相对 DUIX 原项目 compose 的改动：
+#   - 只保留 duix-avatar-gen-video（数字人口播视频生成）
+#   - 去掉原项目的 Fish Speech TTS（duix-avatar-tts）与 FunASR ASR（duix-avatar-asr）——
+#     本项目语音由自己的 voice_bridge（Qwen3-TTS + FunASR）负责
+#   - 镜像改用 5090 系列（guiji2025/duix.avatar-5090），RTX 5060 Ti / 5090 同架构兼容
+#   - deploy.resources 显式声明 nvidia GPU（count: 1）
+#
+# 使用：
+#   docker compose -f docker-compose.duix.yml up -d
+#   # 启动后服务在 http://127.0.0.1:8383（宿主端口映射）
+#   # 共享卷：宿主 d:/duix_avatar_data/face2face = 容器 /code/data
+#   # 成品视频落在宿主 D:\duix_avatar_data\face2face\temp\<code>-s<i>-r.mp4
+
+networks:
+  ai_network:
+    driver: bridge
+
+services:
+  duix-avatar-gen-video:
+    image: guiji2025/duix.avatar-5090
+    container_name: duix-avatar-gen-video
+    restart: always
+    privileged: true
+    volumes:
+      - d:/duix_avatar_data/face2face:/code/data
+    environment:
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    shm_size: '8g'
+    ports:
+      - '8383:8383'
+    command: python /code/app_local.py
+    networks:
+      - ai_network
