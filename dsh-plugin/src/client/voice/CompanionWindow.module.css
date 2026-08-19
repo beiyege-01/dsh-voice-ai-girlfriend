@@ -73,12 +73,15 @@
   background: rgba(255, 255, 255, 0.12);
 }
 
-/* Digital-human generation status pill (bottom center). */
+/* Digital-human generation status pill (bottom right, off the input bar,
+   with a margin so resizing the companion window never pushes it off-screen). */
 .dhCaption {
   position: absolute;
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
+  bottom: 16px;
+  right: 16px;
+  max-width: calc(100% - 32px);
+  overflow: hidden;
+  text-overflow: ellipsis;
   padding: 6px 14px;
   border-radius: 999px;
   background: rgba(10, 11, 16, 0.72);
@@ -88,4 +91,11 @@
   white-space: nowrap;
   pointer-events: none;
   z-index: 5;
+}
+
+/* Companion on the left: mirror to the container's left edge (away from the
+   sidebar) so resizing never pushes it off-screen on that side either. */
+.companion.left .dhCaption {
+  right: auto;
+  left: 16px;
 }
