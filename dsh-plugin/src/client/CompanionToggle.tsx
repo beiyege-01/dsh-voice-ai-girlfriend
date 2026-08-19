@@ -15,15 +15,16 @@ export type CompanionToggleProps =
   PropsRuntime<'conversation.input.left'> & PropsLocale<'voice'> & VoiceInjected
 
 /** Girl-in-window glyph: a rounded window frame holding a person's silhouette
- *  (the companion window shows a living character). Inline, follows currentColor. */
+ *  on the RIGHT side of the window (the companion column sits on the right).
+ *  Inline, follows currentColor. */
 function DisplayIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect x="2.5" y="3" width="19" height="14.5" rx="2.5" />
       <line x1="8" y1="21" x2="16" y2="21" />
       <line x1="12" y1="17.5" x2="12" y2="21" />
-      <circle cx="9" cy="9.2" r="2.2" />
-      <path d="M5.6 14.8a3.6 3.6 0 0 1 6.8 0" />
+      <circle cx="13.5" cy="9" r="2.1" />
+      <path d="M10.7 14.6a3.1 3.1 0 0 1 5.6 0" />
     </svg>
   )
 }
