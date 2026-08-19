@@ -6,6 +6,13 @@
 #     本项目语音由自己的 voice_bridge（Qwen3-TTS + FunASR）负责
 #   - 镜像改用 5090 系列（guiji2025/duix.avatar-5090），RTX 5060 Ti / 5090 同架构兼容
 #   - deploy.resources 显式声明 nvidia GPU（count: 1）
+#   - 挂载 config.ini（宿主可改、容器重建不丢）：chaofen=0 关超分、batch_size=2
+#
+# 提速（实测 7.3s 音频：20.1s → 14.1s，-30%，GPU 96% 满载时帧数是主瓶颈）：
+#   - 形象视频换 15fps（输出规格跟随 avatar.mp4）：
+#       ffmpeg -i avatar.mp4 -vf fps=15 -c:v libx264 -crf 20 -preset fast -an avatar_15fps.mp4
+#     改名 avatar.mp4 即可（原版备份）。1080p 画质不降，帧数 -37% → 提速约 30%。
+#   - config.ini [digital] chaofen = 0（已默认，关超分再快约 10%）。
 #
 # 使用：
 #   docker compose -f docker-compose.duix.yml up -d
@@ -25,6 +32,7 @@ services:
     privileged: true
     volumes:
       - d:/duix_avatar_data/face2face:/code/data
+      - d:/duix_avatar_data/face2face/config.ini:/code/config/config.ini
     environment:
       - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
     deploy:

@@ -311,6 +311,10 @@ venv-speech\Scripts\python.exe bridge\smoke_tts.py --text "你好，我是小雅
 
 **配置**（`bridge-config.json` → `digital_human` 段）：`duix_base` 服务地址、`avatar_video` 形象视频（放共享卷 temp，如 `avatar.mp4`）、`segment_chars` 分段字数（默认 48 ≈ 10s）、`max_keep` 保留条数（默认 200）。
 
+**提速技巧**（实测：7.3s 音频 20.1s → 14.1s，约 -30%）：
+- **形象视频换 15fps**（输出规格跟随 avatar.mp4，1080p 画质不降）：`ffmpeg -i avatar.mp4 -vf fps=15 -c:v libx264 -crf 20 -preset fast -an avatar_15fps.mp4` 改名 avatar.mp4（原版备份）。
+- **关超分**：共享卷放一份 `config.ini`（`[digital] chaofen = 0, batch_size = 2`，compose 已挂载 `/code/config/config.ini`），容器重建不丢，再快约 10%。
+
 **开关**：工具行「数字人」按钮——开：等视频生成完，TTS+画面同步播放；关：去掉视频生成，回到接近即时的纯语音朗读。
 
 > 不开数字人也完全可用：回复走即时逐句 TTS，女友窗播空闲动画即可。
