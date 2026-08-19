@@ -299,10 +299,10 @@ venv-speech\Scripts\python.exe bridge\smoke_tts.py --text "你好，我是小雅
 
 **部署 DUIX**（二选一）：
 
-1. **Docker 一键跑**（推荐）：本项目提供了**精简适配版 compose**（[`bridge/docker-compose.duix.yml`](bridge/docker-compose.duix.yml)）——适配 **RTX 50 系列**（5060 Ti / 5090 同架构），并**已去掉原项目的 Fish Speech TTS 与 FunASR ASR**（语音由本项目自己的 voice_bridge 负责），只保留数字人服务：
+1. **Docker 一键跑**（推荐）：本项目提供了**精简适配版 compose**（[`bridge/docker-compose-5060ti.yml`](bridge/docker-compose-5060ti.yml)）——适配 **RTX 50 系列**（5060 Ti / 5090 同架构），并**已去掉原项目的 Fish Speech TTS 与 FunASR ASR**（语音由本项目自己的 voice_bridge 负责），只保留数字人服务：
 
    ```powershell
-   docker compose -f bridge\docker-compose.duix.yml up -d
+   docker compose -f bridge\docker-compose-5060ti.yml up -d
    ```
 
    启动后数字人服务在 `http://127.0.0.1:8383`，共享卷 `d:/duix_avatar_data/face2face` 映射到容器 `/code/data`，成品视频直接落在宿主 `D:\duix_avatar_data\face2face\temp\`。

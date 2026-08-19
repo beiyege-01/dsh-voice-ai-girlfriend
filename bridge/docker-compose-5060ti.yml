@@ -15,7 +15,7 @@
 #   - config.ini [digital] chaofen = 0（已默认，关超分再快约 10%）。
 #
 # 使用：
-#   docker compose -f docker-compose.duix.yml up -d
+#   docker compose -f docker-compose-5060ti.yml up -d
 #   # 启动后服务在 http://127.0.0.1:8383（宿主端口映射）
 #   # 共享卷：宿主 d:/duix_avatar_data/face2face = 容器 /code/data
 #   # 成品视频落在宿主 D:\duix_avatar_data\face2face\temp\<code>-s<i>-r.mp4
