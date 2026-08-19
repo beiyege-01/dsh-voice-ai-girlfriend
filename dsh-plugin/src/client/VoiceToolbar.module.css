@@ -1,0 +1,22 @@
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 8px;
+  /* Sits in conversation.input.dock — its own row right above the composer
+     card. Keep it slim so it never pushes the card around. */
+}
+
+/* Restrained chip backdrop for every icon in the row: an ultra-faint neutral
+   fill + hairline outline so the glyphs stay legible when chat text scrolls
+   underneath. Deliberately quiet — no color of its own, no shadow; hover still
+   uses each control's own themed hover background (higher specificity). */
+.toolbar button {
+  background: rgba(127, 127, 127, 0.10);
+  box-shadow: inset 0 0 0 1px rgba(127, 127, 127, 0.14);
+}
+
+.toolbar button:active {
+  background: rgba(127, 127, 127, 0.18);
+}
