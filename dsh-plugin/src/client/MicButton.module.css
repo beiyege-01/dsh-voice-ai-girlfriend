@@ -69,9 +69,9 @@
 .mic.listening.voice::after {
   content: '';
   position: absolute;
-  inset: 0;
+  inset: 3px;
   border-radius: 50%;
-  border: 2px solid var(--dsw-alias-state-success-primary);
+  border: 1.5px solid var(--dsw-alias-state-success-primary);
   opacity: 0;
   pointer-events: none;
   animation: mic-ripple 1.6s cubic-bezier(0, 0.4, 0.4, 1) infinite;
@@ -99,8 +99,8 @@
 }
 
 @keyframes mic-ripple {
-  0% { opacity: 0.7; transform: scale(0.9); }
-  100% { opacity: 0; transform: scale(1.55); }
+  0% { opacity: 0.35; transform: scale(0.9); }
+  100% { opacity: 0; transform: scale(1.35); }
 }
 
 @keyframes mic-bar {
