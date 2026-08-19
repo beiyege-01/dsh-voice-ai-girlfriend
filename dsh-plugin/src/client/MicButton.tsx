@@ -20,7 +20,7 @@ import css from './MicButton.module.css'
 /** Full mic-control props: framework runtime share + `voice` locale seat + injected sendText. */
 export type MicButtonProps = PropsRuntime<'conversation.input.left'> & PropsLocale<'voice'> & VoiceInjected
 
-type Phase = 'idle' | 'listening' | 'transcribing'
+type Phase = 'idle' | 'listening' | 'transcribing' | 'error'
 
 /** Mic glyph (inline, follows currentColor). */
 function MicIcon() {
@@ -39,6 +39,9 @@ function MicIcon() {
  */
 export const MicButton = memo(function MicButton({ t, sendText, speaker, interruptReply }: MicButtonProps) {
   const [phase, setPhase] = useState<Phase>('idle')
+  // Recording state: true while the mic hears speech (driven by the recorder's
+  // onSpeakingChange — flips only, no per-chunk re-renders).
+  const [voiceActive, setVoiceActive] = useState(false)
   const recorderRef = useRef<MicRecorder | null>(null)
   const queueRef = useRef<ArrayBuffer[]>([])
   const drainRunningRef = useRef(false)
@@ -123,6 +126,9 @@ export const MicButton = memo(function MicButton({ t, sendText, speaker, interru
         // next utterance automatically.
         interruptReply()
       },
+      onSpeakingChange: (speaking) => {
+        setVoiceActive(speaking)
+      },
       onUtterance: (pcm) => {
         // Continuous listening: queue the utterance and drain serially.
         queueRef.current.push(pcm)
@@ -130,6 +136,7 @@ export const MicButton = memo(function MicButton({ t, sendText, speaker, interru
       },
     })
     recorderRef.current = recorder
+    setVoiceActive(false)
     setPhase('listening')
     try {
       await recorder.start()
@@ -137,16 +144,31 @@ export const MicButton = memo(function MicButton({ t, sendText, speaker, interru
       console.error('[ui-voice] mic start failed:', err)
       recorder.stop()
       recorderRef.current = null
-      setPhase('idle')
+      setVoiceActive(false)
+      setPhase('error')
     }
   }, [interruptReply, drain])
 
+  // Status label under the mic icon: shortest word that describes the state.
+  // idle = off, listening+quiet = standby, listening+voice = recording,
+  // transcribing = recognizing, error = unavailable.
+  const statusLabel = phase === 'idle'
+    ? '关闭'
+    : phase === 'error'
+      ? '不可用'
+      : phase === 'transcribing'
+        ? '识别中'
+        : voiceActive ? '收音中' : '待命'
   const label = phase === 'idle'
     ? t('mic.title')
-    : phase === 'listening' ? t('mic.listening') : t('mic.transcribing')
-  const className = phase === 'idle'
-    ? css.mic
-    : phase === 'listening' ? `${css.mic} ${css.listening}` : `${css.mic} ${css.transcribing}`
+    : phase === 'transcribing' ? t('mic.transcribing') : t('mic.listening')
+  const className = [
+    css.mic,
+    phase === 'listening' ? css.listening : '',
+    phase === 'transcribing' ? css.transcribing : '',
+    phase === 'error' ? css.error : '',
+    phase === 'listening' && voiceActive ? css.voice : '',
+  ].filter(Boolean).join(' ')
 
   return (
     <button
@@ -157,6 +179,7 @@ export const MicButton = memo(function MicButton({ t, sendText, speaker, interru
       onClick={toggle}
     >
       <MicIcon />
+      <span className={css.status}>{statusLabel}</span>
     </button>
   )
 })

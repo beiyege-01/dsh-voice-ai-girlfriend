@@ -1,35 +1,83 @@
 .mic {
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
+  gap: 1px;
+  min-width: 28px;
+  height: auto;
+  padding: 2px 6px;
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: var(--dsw-alias-label-secondary);
+  position: relative;
+  color: var(--dsw-alias-label-dimmed);
   cursor: pointer;
   transition: color 0.2s ease, background 0.2s ease;
 }
 
 .mic:hover {
-  color: var(--dsw-alias-label-primary);
   background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
 }
 
-/* Capturing: red pulse. */
+/* Status word under the icon — quiet, follows the state color. */
+.mic .status {
+  font-size: 9px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: inherit;
+  opacity: 0.85;
+}
+
+/* ── Standby: listening, waiting for speech (blue, slow breathing) ── */
 .mic.listening {
-  color: var(--dsw-alias-state-error-primary);
-  animation: mic-pulse 1.2s ease-in-out infinite;
-}
-
-/* Transcribing: business accent, steady. */
-.mic.transcribing {
   color: var(--dsw-alias-state-business-primary);
+  animation: mic-breathe 2.4s ease-in-out infinite;
 }
 
-@keyframes mic-pulse {
+/* ── Recording: speech detected (green, ripples around the icon) ── */
+.mic.listening.voice {
+  color: var(--dsw-alias-state-success-primary);
+  animation: none;
+}
+
+.mic.listening.voice::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  border: 1.5px solid var(--dsw-alias-state-success-primary);
+  opacity: 0;
+  pointer-events: none;
+  animation: mic-ripple 1.4s ease-out infinite;
+}
+
+/* ── Recognizing: STT in flight (deeper green, double pulse) ── */
+.mic.transcribing {
+  color: color-mix(in srgb, var(--dsw-alias-state-success-primary) 62%, #000);
+  animation: mic-recognize 0.9s ease-in-out infinite;
+}
+
+/* ── Error: mic unavailable (red, steady) ── */
+.mic.error {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+@keyframes mic-breathe {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.45; }
+}
+
+@keyframes mic-ripple {
+  0% { opacity: 0.6; transform: scale(0.85); }
+  70% { opacity: 0; transform: scale(1.35); }
+  100% { opacity: 0; transform: scale(1.35); }
+}
+
+@keyframes mic-recognize {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  30% { opacity: 0.55; transform: scale(0.92); }
+  60% { opacity: 1; transform: scale(1.06); }
 }

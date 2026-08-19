@@ -41,6 +41,10 @@ export interface MicRecorderOptions {
    *  the recorder then switches back to normal accumulation so the user's
    *  ongoing speech becomes the next utterance. */
   onSpeechInterrupt?: () => void
+  /** Called when the "currently capturing speech" flag flips (true = voice
+   *  level above threshold detected, false = utterance ended). The UI uses it
+   *  to show the recording state without per-chunk re-renders. */
+  onSpeakingChange?: (speaking: boolean) => void
   /** Called once with the complete silence-endpointed utterance (PCM16). */
   onUtterance: (pcm16: ArrayBuffer) => void
 }
@@ -246,6 +250,7 @@ export class MicRecorder {
       if (!this.speaking) {
         this.speaking = true
         this.armMaxTimer()
+        this.opts.onSpeakingChange?.(true)
       }
     }
   }
@@ -281,7 +286,10 @@ export class MicRecorder {
     const pcm = this.chunkBytes > 0 ? this.concatChunks() : null
     this.chunks = []
     this.chunkBytes = 0
-    this.speaking = false
+    if (this.speaking) {
+      this.speaking = false
+      this.opts.onSpeakingChange?.(false)
+    }
     if (pcm !== null) this.opts.onUtterance(pcm)
   }
 
