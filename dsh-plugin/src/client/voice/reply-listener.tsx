@@ -14,7 +14,7 @@
  * complete sentences are marked spoken), so existing/old content never
  * replays. Barge-in (mic start) swallows the rest of the current reply.
  */
-import { memo, useEffect, useRef } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pulls ui-conversation's SlotMap merge for PropsRuntime resolution.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -53,8 +53,8 @@ function assistantData(node: { kind: string; data: unknown }): AssistantChatData
 /** Join the node's text blocks (reasoning/tool-call/image excluded). */
 function nodeText(data: AssistantChatData): string {
   return data.blocks
-    .filter((block) => block.kind === 'text')
-    .map((block) => block.text)
+    .filter(block => block.kind === 'text')
+    .map(block => block.text)
     .join('\n')
 }
 
@@ -74,7 +74,7 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
   // Subscribe to the WHOLE snapshot (see T6: `s.chat.nodes` is a stable live
   // store whose reference never changes, so selecting it would never re-render
   // — the top-level snapshot object IS swapped on every publication).
-  const snapshot = useSession((s) => s)
+  const snapshot = useSession(s => s)
 
   // Per-node complete sentences already spoken (node.key -> count).
   const spokenRef = useRef(new Map<string, number>())
@@ -102,6 +102,11 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
   // DH mode (wait-for-video instead of immediate TTS): resolved once from the
   // bridge status (`enabled` + companion visible). null = not resolved yet.
   const dhModeRef = useRef<boolean | null>(null)
+  // Whether the DH-mode resolution has completed (triggers re-render so the
+  // reply that arrived during the pending window is reprocessed with the
+  // correct dhMode — fixes the "TTS speaks first, then the video speaks the
+  // same reply again" double-play race).
+  const [dhResolved, setDhResolved] = useState(false)
   // Code of the most recently submitted digital-human task (for discard).
   const lastDhCodeRef = useRef<string | null>(null)
   // Anchor of the last DH-submitted reply node; a later user node means the
@@ -136,9 +141,22 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
     // render so flipping the toggle mid-session takes effect immediately:
     // turning the toggle OFF falls back to the near-instant sentence TTS.
     if (dhModeRef.current === null) {
-      void dhStatus().then((s) => {
-        if (s !== null) dhModeRef.current = s.enabled === true
-      })
+      // DH 模式尚未确认：先不朗读也不提交视频，等 dhStatus 返回（或 3s 超时
+      // 兜底——桥接不可达时按非 DH 处理，回复仍会 TTS 朗读）。解析完成后
+      // setDhResolved 触发重渲染，等待窗口期到达的回复会按正确的 dhMode 处理，
+      // 避免「同一回复先被逐句 TTS 朗读、又被提交生成视频」的双重播放。
+      let settled = false
+      const finish = (enabled: boolean | null): void => {
+        if (settled) return
+        settled = true
+        if (dhModeRef.current === null) {
+          dhModeRef.current = enabled === true
+        }
+        setDhResolved(true)
+      }
+      void dhStatus().then((s) => finish(s?.enabled === true)).catch(() => finish(false))
+      setTimeout(() => finish(false), 3000)
+      return
     }
     const dhMode = dhModeRef.current === true && companionVisible() && readDigitalHuman()
 
@@ -191,13 +209,27 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
       // Submit each settled, fully-streamed reply's full text to the bridge.
       // No sentence TTS here — the video carries the audio; the companion
       // window plays it (TTS + talking-head together) when generation ends.
+      // Per-turn closing only: a turn may carry many assistant steps (agent
+      // tool-call intermediates, reasoning, interim text). Only the turn's
+      // LAST settled assistant node is a finished reply for the human — the
+      // earlier steps are working noise that would flood the DUIX queue
+      // (one video per tool call) and starve the real reply.
+      const perTurnClosing = new Map<number, { node: { key: string; anchorSeq: number }; data: AssistantChatData; anchor: number }>()
       for (const node of snapshot.chat.nodes.values()) {
         if (node.kind !== 'assistant-step') continue
+        const data = assistantData(node)
+        if (data === undefined || data.status !== 'settled') continue
+        const text = cleanReplyText(nodeText(data), 100000)
+        if (text.trim().length < 2) continue
+        const cur = perTurnClosing.get(data.turn)
+        if (cur === undefined || node.anchorSeq > cur.anchor) {
+          perTurnClosing.set(data.turn, { node, data, anchor: node.anchorSeq })
+        }
+      }
+      for (const { node, data } of perTurnClosing.values()) {
         if (node.anchorSeq <= baselineRef.current) continue
         if (node.anchorSeq === skipAnchorRef.current) continue
         if (dhSentRef.current.has(node.key)) continue
-        const data = assistantData(node)
-        if (data === undefined || data.status !== 'settled') continue
         const text = cleanReplyText(nodeText(data), 100000)
         if (text.trim().length < 2) continue
         dhSentRef.current.add(node.key)
@@ -257,7 +289,7 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
       }),
       chainRef.current,
     )
-  }, [snapshot, speaker, _registerTtsAbort])
+  }, [snapshot, speaker, _registerTtsAbort, dhResolved])
 
   return null
 })
