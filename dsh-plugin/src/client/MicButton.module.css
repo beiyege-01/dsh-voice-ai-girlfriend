@@ -4,9 +4,11 @@
   align-items: center;
   justify-content: center;
   gap: 1px;
+  width: auto;
   min-width: 28px;
   height: auto;
-  padding: 2px 6px;
+  min-height: 34px;
+  padding: 3px 6px 2px;
   border: none;
   border-radius: 6px;
   background: transparent;
@@ -23,7 +25,7 @@
 
 /* Status word under the icon — quiet, follows the state color. */
 .mic .status {
-  font-size: 9px;
+  font-size: 7.5px;
   line-height: 1;
   letter-spacing: 0.02em;
   white-space: nowrap;

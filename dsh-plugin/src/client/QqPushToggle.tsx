@@ -63,6 +63,7 @@ export const QqPushToggle = memo(function QqPushToggle({ t }: QqPushToggleProps)
       onClick={toggle}
     >
       <BubbleIcon />
+      <span className={css.status}>{on ? '推送' : '关'}</span>
     </button>
   )
 })

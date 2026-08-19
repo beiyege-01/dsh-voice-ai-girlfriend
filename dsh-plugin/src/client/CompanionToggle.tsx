@@ -47,6 +47,7 @@ export const CompanionToggle = memo(function CompanionToggle({ t, companion }: C
       onClick={toggle}
     >
       <DisplayIcon />
+      <span className={css.status}>{on ? '开' : '关'}</span>
     </button>
   )
 })
