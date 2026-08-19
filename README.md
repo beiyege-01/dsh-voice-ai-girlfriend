@@ -293,7 +293,7 @@ venv-speech\Scripts\python.exe bridge\smoke_tts.py --text "你好，我是小雅
 
 回复不只是一段声音——配合 **DUIX 数字人引擎**，小雅会把你的回复实时生成**口播视频**：TTS 音频交给 DUIX（`http://127.0.0.1:8383`），它渲染出对应口型的视频，女友窗在生成完毕后**视频 + 声音同刻播放**（音频已混入视频，天然同步）。
 
-**流式分段**：长回复自动切成 ≤10 秒的小段（按句读/硬切），**当前段生成画面时，下一段语音已在后台合成**——一段播完立即续接下一段，全程不干等。生成的口播视频保留最近 50 条（`GET /api/dh/history` 可回看）。
+**流式分段**：长回复自动切成 ≤10 秒的小段（按句读/硬切），**当前段生成画面时，下一段语音已在后台合成**——一段播完立即续接下一段，全程不干等。生成的口播视频保留最近 200 条（`GET /api/dh/history` 可回看）。
 
 **部署 DUIX**（二选一）：
 
@@ -307,7 +307,7 @@ venv-speech\Scripts\python.exe bridge\smoke_tts.py --text "你好，我是小雅
 
 2. **手动跑**：拉取 `guiji2025/duix.avatar-5090` 镜像后 `python /code/app_local.py`（容器内）。
 
-**配置**（`bridge-config.json` → `digital_human` 段）：`duix_base` 服务地址、`avatar_video` 形象视频（放共享卷 temp，如 `avatar.mp4`）、`segment_chars` 分段字数（默认 48 ≈ 10s）、`max_keep` 保留条数（默认 50）。
+**配置**（`bridge-config.json` → `digital_human` 段）：`duix_base` 服务地址、`avatar_video` 形象视频（放共享卷 temp，如 `avatar.mp4`）、`segment_chars` 分段字数（默认 48 ≈ 10s）、`max_keep` 保留条数（默认 200）。
 
 **开关**：工具行「数字人」按钮——开：等视频生成完，TTS+画面同步播放；关：去掉视频生成，回到接近即时的纯语音朗读。
 

@@ -200,6 +200,20 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
     setDhPlayingBoth(false)
   }, [setDhPlayingBoth])
 
+  // 用户占用麦克风/说话（interruptReply）：停止数字人视频播放。
+  // 只停播放并作废当前任务的播放队列（防止轮询续播），不调用 dhDiscard、
+  // 不删文件——桥接的生成与存取逻辑完全不受影响。
+  useEffect(() => {
+    return companion.subscribeInterrupt(() => {
+      stopDh()
+      dhQueueRef.current = []
+      dhQueuePlayedRef.current = 0
+      if (dhQueueCodeRef.current !== '') {
+        handledDhRef.current.add(dhQueueCodeRef.current)
+      }
+    })
+  }, [companion, stopDh])
+
   /** Play the next queued segment video (or stop when the playlist is done). */
   const playNextDh = useCallback(() => {
     const vid = dhRef.current

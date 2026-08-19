@@ -111,6 +111,9 @@ export function apply(ctx: ClientContext): void {
       speaker.stop()
       activeTtsController?.abort()
       activeTtsController = null
+      // 用户占用麦克风/说话：同时停止数字人视频播放（只停播放，不涉及
+      // 桥接的生成任务与磁盘文件）。
+      companion.notifyMicInterrupt()
       interruptHandler?.()
     },
     _registerInterruptHandler: (handler: (() => void) | null) => {
