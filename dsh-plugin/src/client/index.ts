@@ -14,6 +14,7 @@ import { MicButton } from './MicButton.tsx'
 import { BusyToggle } from './BusyToggle.tsx'
 import { QqPushToggle } from './QqPushToggle.tsx'
 import { DigitalHumanToggle } from './DigitalHumanToggle.tsx'
+import { BalanceBadge } from './BalanceBadge.tsx'
 import { BridgeStatus } from './BridgeStatus.tsx'
 import { ReplySpeakerMount } from './voice/reply-listener.tsx'
 import { QQBridge } from './voice/qq-bridge.tsx'
@@ -206,6 +207,20 @@ export function apply(ctx: ClientContext): void {
       inject: injectFace,
     },
     DigitalHumanToggle,
+  ))
+
+  // DeepSeek balance chip lives in the bottom status dock (next to the
+  // turns/steps/tool-time stats line): shows ¥/USD on load; click to refresh.
+  // Zero polling — the bridge caches the upstream answer 10 minutes.
+  ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register(
+    {
+      name: 'conversation.composer.dock',
+      id: 'voice-balance-badge',
+      order: 1,
+      locale: NS,
+      inject: injectFace,
+    },
+    BalanceBadge,
   ))
 
   // Hidden per-session reply listener: speaks finalized assistant text.
