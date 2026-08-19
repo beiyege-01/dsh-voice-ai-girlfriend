@@ -252,9 +252,13 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
     }
     if (status.state === 'tts' || status.state === 'generating') {
       const now = Date.now()
+      // 等待超时按段数动态计算（每段 ~25s + 60s 基础）：多段任务（5-8 段
+      // 需 1-3 分钟）不能被固定 90s 误判为"太慢"而回退 TTS（那就是"只有
+      // 声音、没有视频"的根因）。只有 DUIX 真卡死（远超应有时间）才回退。
+      const timeoutMs = 60000 + (status.total_segments || 1) * 25000
       if (waitingDhRef.current === null || waitingDhRef.current.code !== code) {
         waitingDhRef.current = { code, at: now }
-      } else if (now - waitingDhRef.current.at > 90000) {
+      } else if (now - waitingDhRef.current.at > timeoutMs) {
         // Generation taking too long: stop waiting, speak the reply directly.
         handledDhRef.current.add(code)
         waitingDhRef.current = null
