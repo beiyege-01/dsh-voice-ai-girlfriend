@@ -72,7 +72,6 @@ export const VoiceToggle = memo(function VoiceToggle({ t, speaker, abortTts }: V
       onClick={toggle}
     >
       <SpeakerIcon />
-      <span className={css.status}>{on ? '开' : '关'}</span>
-    </button>
+      </button>
   )
 })

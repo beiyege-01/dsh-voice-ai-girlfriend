@@ -149,19 +149,16 @@ export const MicButton = memo(function MicButton({ t, sendText, speaker, interru
     }
   }, [interruptReply, drain])
 
-  // Status label under the mic icon: shortest word that describes the state.
-  // idle = off, listening+quiet = standby, listening+voice = recording,
-  // transcribing = recognizing, error = unavailable.
-  const statusLabel = phase === 'idle'
-    ? '关闭'
+  // Hover explanation: current state + its color meaning (no label under the
+  // icon anymore). idle = off, listening+quiet = standby, listening+voice =
+  // recording, transcribing = recognizing, error = unavailable.
+  const statusTitle = phase === 'idle'
+    ? '已关闭（灰）·点击开启聆听'
     : phase === 'error'
-      ? '不可用'
+      ? '不可用（红）·点击重试'
       : phase === 'transcribing'
-        ? '识别中'
-        : voiceActive ? '收音中' : '待命'
-  const label = phase === 'idle'
-    ? t('mic.title')
-    : phase === 'transcribing' ? t('mic.transcribing') : t('mic.listening')
+        ? '识别中（深绿）'
+        : voiceActive ? '收音中（绿）' : '待命（蓝）'
   const className = [
     css.mic,
     phase === 'listening' ? css.listening : '',
@@ -174,12 +171,11 @@ export const MicButton = memo(function MicButton({ t, sendText, speaker, interru
     <button
       type="button"
       className={className}
-      title={label}
-      aria-label={label}
+      title={`${t('mic.title')} · ${statusTitle}`}
+      aria-label={`${t('mic.title')} · ${statusTitle}`}
       onClick={toggle}
     >
       <MicIcon />
-      <span className={css.status}>{statusLabel}</span>
     </button>
   )
 })

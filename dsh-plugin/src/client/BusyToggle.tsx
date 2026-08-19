@@ -68,7 +68,6 @@ export const BusyToggle = memo(function BusyToggle({ t }: BusyToggleProps) {
       onClick={toggle}
     >
       <BoltIcon />
-      <span className={css.status}>{on ? '插话' : '排队'}</span>
-    </button>
+      </button>
   )
 })

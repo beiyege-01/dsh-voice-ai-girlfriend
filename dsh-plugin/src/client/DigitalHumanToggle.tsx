@@ -69,7 +69,6 @@ export const DigitalHumanToggle = memo(function DigitalHumanToggle({ t }: Digita
       onClick={toggle}
     >
       <DigitalHumanIcon />
-      <span className={css.status}>{on ? '数字人' : '关'}</span>
-    </button>
+      </button>
   )
 })

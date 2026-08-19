@@ -1,14 +1,10 @@
 .mic {
   display: inline-flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1px;
-  width: auto;
-  min-width: 28px;
-  height: auto;
-  min-height: 34px;
-  padding: 3px 6px 2px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
   border: none;
   border-radius: 6px;
   background: transparent;
@@ -21,16 +17,6 @@
 .mic:hover {
   background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-primary);
-}
-
-/* Status word under the icon — quiet, follows the state color. */
-.mic .status {
-  font-size: 7.5px;
-  line-height: 1;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-  color: inherit;
-  opacity: 0.85;
 }
 
 /* ── Standby: listening, waiting for speech (blue, slow breathing) ── */
