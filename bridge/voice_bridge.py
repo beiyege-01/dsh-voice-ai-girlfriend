@@ -513,6 +513,16 @@ def _dh_pop_next() -> dict | None:
         return item
 
 
+def _dh_has_newer_pending() -> bool:
+    """是否已有更新的回复在排队（段级抢占判断）。
+
+    队列里只保留最新一条未开始任务（见 _dh_pop_next），所以存在未开始任务
+    就意味着有更新的回复在等——当前任务应停止剩余段，把 DUIX 让给最新回复。
+    """
+    with _dh_lock:
+        return any(not t["started"] for t in _dh_queue)
+
+
 class DHSpeakRequest(BaseModel):
     text: str
 
@@ -678,6 +688,17 @@ async def _dh_run(item: dict) -> None:
                 if code in _dh_discarded:
                     _dh_set(state="discarded", message="已取消（被打断）", progress=0, code=code, text=text, videos=[])
                     logger.info("DH %s: discarded before segment %d", code, i)
+                    return
+                if _dh_has_newer_pending():
+                    # 更新的回复已提交：停止本任务剩余段，把 DUIX 让给最新回复。
+                    # 已生成的段视频保留在磁盘（存取不受影响）；新任务开始后
+                    # （code 变化）companion 自动切到新任务的播放列表。
+                    _dh_set(
+                        state="discarded", message="被新回复取代",
+                        progress=round(i / total * 100),
+                        code=code, text=text, done_segments=i,
+                    )
+                    logger.info("DH %s: preempted by newer task at segment %d/%d", code, i, total)
                     return
                 _dh_set(
                     state="generating",
