@@ -176,6 +176,7 @@ export const MicButton = memo(function MicButton({ t, sendText, speaker, interru
       onClick={toggle}
     >
       <MicIcon />
+      <span className={css.waves} aria-hidden="true"><i /><i /><i /></span>
     </button>
   )
 })
