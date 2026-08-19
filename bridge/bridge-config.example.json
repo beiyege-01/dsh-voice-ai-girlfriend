@@ -40,5 +40,17 @@
     "napcat_base": "http://127.0.0.1:3000",
     "napcat_token": "你的NapCat OneBot token",
     "target_qq": 0
+  },
+  "digital_human": {
+    "enabled": true,
+    "duix_base": "http://127.0.0.1:8383",
+    "data_dir": "D:/duix_avatar_data/face2face",
+    "temp_dir": "temp",
+    "avatar_video": "avatar.mp4",
+    "max_keep": 200,
+    "segment_chars": 48,
+    "submit_retry_sec": 5,
+    "query_interval_sec": 2,
+    "query_timeout_sec": 240
   }
 }

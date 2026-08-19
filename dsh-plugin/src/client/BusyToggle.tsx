@@ -68,6 +68,6 @@ export const BusyToggle = memo(function BusyToggle({ t }: BusyToggleProps) {
       onClick={toggle}
     >
       <BoltIcon />
-    </button>
+      </button>
   )
 })

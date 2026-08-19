@@ -13,6 +13,8 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { MicButton } from './MicButton.tsx'
 import { BusyToggle } from './BusyToggle.tsx'
 import { QqPushToggle } from './QqPushToggle.tsx'
+import { DigitalHumanToggle } from './DigitalHumanToggle.tsx'
+import { BalanceBadge } from './BalanceBadge.tsx'
 import { BridgeStatus } from './BridgeStatus.tsx'
 import { ReplySpeakerMount } from './voice/reply-listener.tsx'
 import { QQBridge } from './voice/qq-bridge.tsx'
@@ -110,6 +112,9 @@ export function apply(ctx: ClientContext): void {
       speaker.stop()
       activeTtsController?.abort()
       activeTtsController = null
+      // 用户占用麦克风/说话：同时停止数字人视频播放（只停播放，不涉及
+      // 桥接的生成任务与磁盘文件）。
+      companion.notifyMicInterrupt()
       interruptHandler?.()
     },
     _registerInterruptHandler: (handler: (() => void) | null) => {
@@ -189,6 +194,33 @@ export function apply(ctx: ClientContext): void {
       inject: injectFace,
     },
     BusyToggle,
+  ))
+
+  // Digital-human toggle (s2s.voice.digitalHuman): ON = replies wait for the
+  // lip-synced video (TTS+video together); OFF = near-instant sentence TTS.
+  ctx.slots.inject('conversation.input.left', () => ctx.slots.register(
+    {
+      name: 'conversation.input.left',
+      id: 'voice-dh-toggle',
+      order: 88,
+      locale: NS,
+      inject: injectFace,
+    },
+    DigitalHumanToggle,
+  ))
+
+  // DeepSeek balance chip lives in the bottom status dock (next to the
+  // turns/steps/tool-time stats line): shows ¥/USD on load; click to refresh.
+  // Zero polling — the bridge caches the upstream answer 10 minutes.
+  ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register(
+    {
+      name: 'conversation.composer.dock',
+      id: 'voice-balance-badge',
+      order: 1,
+      locale: NS,
+      inject: injectFace,
+    },
+    BalanceBadge,
   ))
 
   // Hidden per-session reply listener: speaks finalized assistant text.

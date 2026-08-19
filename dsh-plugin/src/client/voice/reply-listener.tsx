@@ -19,7 +19,8 @@ import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots
 // Type-only: pulls ui-conversation's SlotMap merge for PropsRuntime resolution.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { AssistantChatData } from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { tts } from '../bridge.ts'
+import { tts, dhSpeak, dhStatus, dhDiscard } from '../bridge.ts'
+import { readDigitalHuman } from '../DigitalHumanToggle.tsx'
 import type { VoiceInjected } from '../contract.ts'
 import { cleanReplyText } from './clean.ts'
 import { splitSentences } from './sentences.ts'
@@ -29,6 +30,15 @@ const VOICE_ENABLED_KEY = 's2s.voice.enabled'
 function voiceEnabled(): boolean {
   try {
     return localStorage.getItem(VOICE_ENABLED_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+
+/** Companion window visibility (digital-human video only matters when it shows). */
+function companionVisible(): boolean {
+  try {
+    return localStorage.getItem('s2s.voice.companion') !== '0'
   } catch {
     return true
   }
@@ -87,6 +97,18 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
   const interruptRef = useRef(false)
   const skipAnchorRef = useRef(0)
   const skipUntilRef = useRef(0)
+  // Digital-human: nodes whose finished reply was already handed to the bridge.
+  const dhSentRef = useRef(new Set<string>())
+  // DH mode (wait-for-video instead of immediate TTS): resolved once from the
+  // bridge status (`enabled` + companion visible). null = not resolved yet.
+  const dhModeRef = useRef<boolean | null>(null)
+  // Code of the most recently submitted digital-human task (for discard).
+  const lastDhCodeRef = useRef<string | null>(null)
+  // Anchor of the last DH-submitted reply node; a later user node means the
+  // pending video is stale and should be discarded.
+  const lastDhReplyAnchorRef = useRef(0)
+  // Highest user-node anchor seen (new-turn detection).
+  const lastUserAnchorRef = useRef(0)
 
   // Register the barge-in handler once (the mic calls interruptReply).
   useEffect(() => {
@@ -102,15 +124,30 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
     _registerTtsAbort(null)
   }, [speaker, _registerTtsAbort])
 
-  // Stream new complete sentences to TTS on every snapshot change.
+  // Stream new complete sentences to TTS on every snapshot change. In digital
+  // human mode the reply is NOT spoken immediately — its full text goes to the
+  // bridge, which renders a lip-synced video (with the TTS audio embedded);
+  // the companion window plays video + sound together once it is ready.
   useEffect(() => {
     if (!voiceEnabled()) return
 
+    // Resolve the bridge DH availability once (config doesn't change at runtime);
+    // companion visibility + the digital-human toggle are RE-CHECKED every
+    // render so flipping the toggle mid-session takes effect immediately:
+    // turning the toggle OFF falls back to the near-instant sentence TTS.
+    if (dhModeRef.current === null) {
+      void dhStatus().then((s) => {
+        if (s !== null) dhModeRef.current = s.enabled === true
+      })
+    }
+    const dhMode = dhModeRef.current === true && companionVisible() && readDigitalHuman()
+
     // Barge-in swallowed the CURRENT reply: remember its exact anchor so only
     // that reply's remaining sentences are skipped; replies that appear
-    // later (or that already appeared) still speak. (Playback/fetch abort is
-    // handled by interruptReply itself.)
+    // later (or that already appeared) still speak. In DH mode, discard the
+    // pending video task (the reply is being talked over).
     if (interruptRef.current) {
+      if (dhMode) dhDiscard(lastDhCodeRef.current)
       let maxAnchor = 0
       for (const node of snapshot.chat.nodes.values()) {
         if (node.kind === 'assistant-step' && node.anchorSeq > maxAnchor) maxAnchor = node.anchorSeq
@@ -141,11 +178,41 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
       return
     }
 
-    // Collect the complete sentences that are new (beyond each node's spoken
-    // count), in (anchor, index) order. A SETTLED node also flushes its
-    // trailing partial (the reply ended without a terminal punctuation, like
-    // a credit line) — mirroring the original backend's end-of-response
-    // flush; running nodes wait for the partial to complete.
+    if (dhMode) {
+      // New user turn after a DH-submitted reply: the pending video is stale.
+      for (const node of snapshot.chat.nodes.values()) {
+        if (node.kind !== 'user') continue
+        if (node.anchorSeq <= lastUserAnchorRef.current) continue
+        lastUserAnchorRef.current = node.anchorSeq
+        if (lastDhReplyAnchorRef.current > 0 && node.anchorSeq > lastDhReplyAnchorRef.current) {
+          dhDiscard(lastDhCodeRef.current)
+        }
+      }
+      // Submit each settled, fully-streamed reply's full text to the bridge.
+      // No sentence TTS here — the video carries the audio; the companion
+      // window plays it (TTS + talking-head together) when generation ends.
+      for (const node of snapshot.chat.nodes.values()) {
+        if (node.kind !== 'assistant-step') continue
+        if (node.anchorSeq <= baselineRef.current) continue
+        if (node.anchorSeq === skipAnchorRef.current) continue
+        if (dhSentRef.current.has(node.key)) continue
+        const data = assistantData(node)
+        if (data === undefined || data.status !== 'settled') continue
+        const text = cleanReplyText(nodeText(data), 100000)
+        if (text.trim().length < 2) continue
+        dhSentRef.current.add(node.key)
+        lastDhReplyAnchorRef.current = node.anchorSeq
+        void dhSpeak(text).then((code) => {
+          if (code !== null) lastDhCodeRef.current = code
+        })
+      }
+      return
+    }
+
+    // Non-DH mode: collect the complete sentences that are new (beyond each
+    // node's spoken count), in (anchor, index) order. A SETTLED node also
+    // flushes its trailing partial (the reply ended without a terminal
+    // punctuation, like a credit line); running nodes wait for the partial.
     const jobs: { anchor: number; key: string; index: number; sentence: string }[] = []
     for (const node of snapshot.chat.nodes.values()) {
       if (node.kind !== 'assistant-step') continue

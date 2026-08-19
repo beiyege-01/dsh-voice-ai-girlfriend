@@ -20,6 +20,14 @@ bridge/bridge-config.json
 ref_audio.wav
 ref_audio.*
 
+# ---- Personal media assets (user-only, never uploaded) ----
+assets/bg-images/
+assets/task-videos/
+assets/*.mp4
+assets/*.jpg
+assets/*.png
+assets/*.wav
+
 # ---- Scratch / temp artifacts ----
 *.bak
 tts_out.wav

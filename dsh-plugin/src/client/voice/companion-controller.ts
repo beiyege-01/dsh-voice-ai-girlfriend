@@ -10,6 +10,7 @@ const COMPANION_KEY = 's2s.voice.companion'
 
 export class CompanionController {
   private listeners = new Set<() => void>()
+  private interruptListeners = new Set<() => void>()
   private value: boolean
 
   constructor() {
@@ -40,6 +41,22 @@ export class CompanionController {
     this.listeners.add(listener)
     return () => {
       this.listeners.delete(listener)
+    }
+  }
+
+  /**
+   * 用户占用麦克风/说话（interruptReply 触发）：通知女友窗停止数字人视频
+   * 播放。只停播放，不涉及桥接的生成任务与磁盘文件（生成/存取不受影响）。
+   */
+  notifyMicInterrupt(): void {
+    for (const listener of this.interruptListeners) listener()
+  }
+
+  /** 订阅"麦克风占用/用户说话"事件；返回退订函数。 */
+  subscribeInterrupt(listener: () => void): () => void {
+    this.interruptListeners.add(listener)
+    return () => {
+      this.interruptListeners.delete(listener)
     }
   }
 }

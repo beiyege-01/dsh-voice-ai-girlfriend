@@ -8,28 +8,107 @@
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: var(--dsw-alias-label-secondary);
+  position: relative;
+  color: var(--dsw-alias-label-dimmed);
   cursor: pointer;
   transition: color 0.2s ease, background 0.2s ease;
 }
 
 .mic:hover {
-  color: var(--dsw-alias-label-primary);
   background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
 }
 
-/* Capturing: red pulse. */
+/* Fake sound-wave bars at the bottom edge, shown only while recording. */
+.mic .waves {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: 3px;
+  height: 3px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.mic .waves i {
+  width: 2px;
+  border-radius: 1px;
+  background: currentColor;
+  height: 1px;
+  transition: opacity 0.2s ease;
+}
+
+/* ── Standby: listening, waiting for speech (blue glow breathing + micro scale) ── */
 .mic.listening {
-  color: var(--dsw-alias-state-error-primary);
-  animation: mic-pulse 1.2s ease-in-out infinite;
-}
-
-/* Transcribing: business accent, steady. */
-.mic.transcribing {
   color: var(--dsw-alias-state-business-primary);
+  animation: mic-standby 2.4s ease-in-out infinite;
 }
 
-@keyframes mic-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.45; }
+@keyframes mic-standby {
+  0%, 100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 1px rgba(56, 132, 255, 0));
+  }
+  50% {
+    transform: scale(1.07);
+    filter: drop-shadow(0 0 6px rgba(56, 132, 255, 0.55));
+  }
+}
+
+/* ── Recording: speech detected (green glow breathing + sound bars only) ── */
+.mic.listening.voice {
+  color: var(--dsw-alias-state-success-primary);
+  animation: mic-rec-glow 1.2s ease-in-out infinite;
+}
+
+.mic.listening.voice .waves {
+  opacity: 1;
+}
+
+.mic.listening.voice .waves i {
+  animation: mic-bar 0.7s ease-in-out infinite;
+}
+
+.mic.listening.voice .waves i:nth-child(1) { animation-delay: 0s; }
+.mic.listening.voice .waves i:nth-child(2) { animation-delay: 0.18s; }
+.mic.listening.voice .waves i:nth-child(3) { animation-delay: 0.36s; }
+
+@keyframes mic-rec-glow {
+  0%, 100% { filter: drop-shadow(0 0 2px rgba(34, 197, 94, 0.25)); }
+  50% { filter: drop-shadow(0 0 7px rgba(34, 197, 94, 0.6)); }
+}
+
+@keyframes mic-bar {
+  0%, 100% { height: 1px; opacity: 0.5; }
+  50% { height: 3px; opacity: 1; }
+}
+
+/* ── Recognizing: STT in flight (deep green spinning ring) ── */
+.mic.transcribing {
+  color: color-mix(in srgb, var(--dsw-alias-state-success-primary) 62%, #000);
+}
+
+.mic.transcribing::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: color-mix(in srgb, var(--dsw-alias-state-success-primary) 62%, #000);
+  opacity: 0.9;
+  pointer-events: none;
+  animation: mic-spin 0.8s linear infinite;
+}
+
+@keyframes mic-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Error: mic unavailable (red, steady) ── */
+.mic.error {
+  color: var(--dsw-alias-state-error-primary);
 }

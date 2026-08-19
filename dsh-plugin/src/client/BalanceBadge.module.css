@@ -1,0 +1,22 @@
+/* Balance chip in the composer.dock stats area: a tiny clickable line that
+   sits right under the turns/steps/tool-time stats. Follows the tertiary
+   label style of the stats row. */
+
+.chip {
+  display: inline-block;
+  margin: 0 auto;
+  padding: 0 10px 4px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.2s ease;
+}
+
+.chip:hover {
+  color: var(--dsw-alias-label-primary);
+}

@@ -63,6 +63,6 @@ export const QqPushToggle = memo(function QqPushToggle({ t }: QqPushToggleProps)
       onClick={toggle}
     >
       <BubbleIcon />
-    </button>
+      </button>
   )
 })

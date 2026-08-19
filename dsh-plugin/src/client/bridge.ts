@@ -48,6 +48,74 @@ export async function tts(text: string, signal?: AbortSignal): Promise<ArrayBuff
   return resp.arrayBuffer()
 }
 
+/** Digital-human task state surfaced by the bridge. */
+export interface DhStatus {
+  enabled: boolean
+  state: 'idle' | 'tts' | 'generating' | 'done' | 'error' | 'discarded' | string
+  message: string
+  progress: number
+  video_file: string
+  video_url: string
+  /** 本回复已产出的小段视频（续接播放列表）。 */
+  videos: { video_file: string; video_url: string }[]
+  total_segments: number
+  done_segments: number
+  code: string
+  text: string
+  pending: number
+  updated_at: number
+}
+
+/**
+ * Digital human: submit a finished reply text so the bridge synthesizes it
+ * with the same TTS voice and renders a lip-synced talking-head video (DUIX).
+ * Resolves with the task code (null on failure); the latest submission
+ * replaces any not-yet-started one in the bridge queue.
+ */
+export function dhSpeak(text: string): Promise<string | null> {
+  const body = (text || '').trim()
+  if (!body) return Promise.resolve(null)
+  return fetch(`${bridgeBase()}/api/dh/speak`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: body }),
+  })
+    .then(async (resp) => {
+      if (!resp.ok) {
+        const b = await resp.text().catch(() => '')
+        throw new Error(`/api/dh/speak failed: ${resp.status} ${b}`.trim())
+      }
+      const json = (await resp.json()) as { code?: string }
+      return json.code ?? null
+    })
+    .catch((err) => {
+      console.error('[ui-voice] digital human submit failed:', err)
+      return null
+    })
+}
+
+/** Discard a submitted digital-human task (barge-in / new turn): its result
+ *  will never be played. Safe to call with null (no-op). */
+export function dhDiscard(code: string | null | undefined): void {
+  if (!code) return
+  void fetch(`${bridgeBase()}/api/dh/discard`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  }).catch((err) => console.error('[ui-voice] digital human discard failed:', err))
+}
+
+/** Poll the digital-human task state (companion window playback driver). */
+export async function dhStatus(): Promise<DhStatus | null> {
+  try {
+    const resp = await fetch(`${bridgeBase()}/api/dh/status`)
+    if (!resp.ok) return null
+    return resp.json() as Promise<DhStatus>
+  } catch {
+    return null
+  }
+}
+
 /**
  * Streaming silero VAD client for barge-in detection (the server-side VAD of
  * the original speech-to-speech project). While a reply is playing the mic
