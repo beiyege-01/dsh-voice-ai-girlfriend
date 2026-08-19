@@ -59,26 +59,10 @@
   }
 }
 
-/* ── Recording: speech detected (green glow + double ripple + sound bars) ── */
+/* ── Recording: speech detected (green glow breathing + sound bars only) ── */
 .mic.listening.voice {
   color: var(--dsw-alias-state-success-primary);
   animation: mic-rec-glow 1.2s ease-in-out infinite;
-}
-
-.mic.listening.voice::before,
-.mic.listening.voice::after {
-  content: '';
-  position: absolute;
-  inset: 3px;
-  border-radius: 50%;
-  border: 1.5px solid var(--dsw-alias-state-success-primary);
-  opacity: 0;
-  pointer-events: none;
-  animation: mic-ripple 1.6s cubic-bezier(0, 0.4, 0.4, 1) infinite;
-}
-
-.mic.listening.voice::after {
-  animation-delay: 0.8s;
 }
 
 .mic.listening.voice .waves {
@@ -94,13 +78,8 @@
 .mic.listening.voice .waves i:nth-child(3) { animation-delay: 0.36s; }
 
 @keyframes mic-rec-glow {
-  0%, 100% { filter: drop-shadow(0 0 2px rgba(34, 197, 94, 0.3)); }
-  50% { filter: drop-shadow(0 0 9px rgba(34, 197, 94, 0.75)); }
-}
-
-@keyframes mic-ripple {
-  0% { opacity: 0.35; transform: scale(0.9); }
-  100% { opacity: 0; transform: scale(1.35); }
+  0%, 100% { filter: drop-shadow(0 0 2px rgba(34, 197, 94, 0.25)); }
+  50% { filter: drop-shadow(0 0 7px rgba(34, 197, 94, 0.6)); }
 }
 
 @keyframes mic-bar {
