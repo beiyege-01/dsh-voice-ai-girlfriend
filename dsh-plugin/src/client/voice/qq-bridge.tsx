@@ -38,8 +38,8 @@ function assistantData(node: { kind: string; data: unknown }): AssistantChatData
 
 function nodeText(data: AssistantChatData): string {
   return data.blocks
-    .filter((block) => block.kind === 'text')
-    .map((block) => block.text)
+    .filter(block => block.kind === 'text')
+    .map(block => block.text)
     .join('\n')
 }
 
@@ -49,7 +49,11 @@ function nodeText(data: AssistantChatData): string {
 export const QQBridge = memo(function QQBridge({ useSession, sendText }: QQBridgeProps) {
   const wsRef = useRef<WebSocket | null>(null)
   const lastReplyAnchorRef = useRef(0)
-  const snapshot = useSession((s) => s)
+  // Sticky flag: this session ever contained a tool-call node → it is an
+  // agent working session. Only plain chat replies are voiced to QQ; agent
+  // tool-call intermediates / interim text are not (matches the DUIX skip).
+  const seenToolCallRef = useRef(false)
+  const snapshot = useSession(s => s)
 
   // WS connect with auto-reconnect (3s). Only one tab should run this (the
   // bridge itself replaces stale connections).
@@ -85,9 +89,13 @@ export const QQBridge = memo(function QQBridge({ useSession, sendText }: QQBridg
   }, [sendText])
 
   // New settled assistant reply -> push text to the bridge (it voices it to QQ).
-  // Skips entirely when the QQ push toggle is off.
+  // Skips entirely when the QQ push toggle is off. Agent working sessions
+  // (any tool-call seen) are skipped: only plain chat replies reach QQ.
   useEffect(() => {
     if (!readQqPush()) return
+    for (const node of snapshot.chat.nodes.values()) {
+      if (node.kind === 'tool-call') seenToolCallRef.current = true
+    }
     let maxAnchor = 0
     let newest: { anchor: number; text: string } | null = null
     for (const node of snapshot.chat.nodes.values()) {
@@ -99,6 +107,7 @@ export const QQBridge = memo(function QQBridge({ useSession, sendText }: QQBridg
         newest = { anchor: node.anchorSeq, text: cleanReplyText(nodeText(data), 100000) }
       }
     }
+    if (seenToolCallRef.current) return // agent working session — no QQ voice
     if (newest !== null && newest.anchor > lastReplyAnchorRef.current) {
       lastReplyAnchorRef.current = newest.anchor
       const text = newest.text.trim()

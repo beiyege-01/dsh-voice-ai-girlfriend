@@ -99,6 +99,11 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
   const skipUntilRef = useRef(0)
   // Digital-human: nodes whose finished reply was already handed to the bridge.
   const dhSentRef = useRef(new Set<string>())
+  // Sticky flag: this session ever contained a tool-call node → it is an
+  // agent working session, not a plain chat. DUIX videos are for chat replies
+  // only, so once set, DH submissions are skipped (stops the flood of one
+  // video per agent tool-call output).
+  const seenToolCallRef = useRef(false)
   // DH mode (wait-for-video instead of immediate TTS): resolved once from the
   // bridge status (`enabled` + companion visible). null = not resolved yet.
   const dhModeRef = useRef<boolean | null>(null)
@@ -214,6 +219,15 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
       // LAST settled assistant node is a finished reply for the human — the
       // earlier steps are working noise that would flood the DUIX queue
       // (one video per tool call) and starve the real reply.
+      // Any tool-call node ever seen marks this session as an AGENT working
+      // session (tools doing things, interim text between calls): DUIX
+      // talking-head videos are for plain chat replies, so once tools are
+      // involved we stop feeding DUIX from this session. The flag is sticky
+      // (seenToolCallRef) so agent turns whose tool nodes have already been
+      // compacted away still count.
+      for (const node of snapshot.chat.nodes.values()) {
+        if (node.kind === 'tool-call') seenToolCallRef.current = true
+      }
       const perTurnClosing = new Map<number, { node: { key: string; anchorSeq: number }; data: AssistantChatData; anchor: number }>()
       for (const node of snapshot.chat.nodes.values()) {
         if (node.kind !== 'assistant-step') continue
@@ -227,6 +241,7 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
         }
       }
       for (const { node, data } of perTurnClosing.values()) {
+        if (seenToolCallRef.current) continue // agent working session — not a chat reply
         if (node.anchorSeq <= baselineRef.current) continue
         if (node.anchorSeq === skipAnchorRef.current) continue
         if (dhSentRef.current.has(node.key)) continue
