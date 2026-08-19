@@ -58,6 +58,28 @@ function nodeText(data: AssistantChatData): string {
     .join('\n')
 }
 
+/**
+ * Whether an assistant node is a plain chat reply (as opposed to agent
+ * working output): the nearest PRECEDING non-assistant node must be a USER
+ * node. A reply that follows a tool-call (or steering/context) is agent
+ * tooling noise — it should never feed DUIX/QQ voice.
+ */
+function isChatReply(
+  snapshot: { chat: { nodes: { values(): readonly { kind: string; anchorSeq: number }[] } } },
+  anchor: number,
+): boolean {
+  let nearestSeq = -1
+  let nearestKind = ''
+  for (const node of snapshot.chat.nodes.values()) {
+    if (node.kind === 'assistant-step') continue
+    if (node.anchorSeq < anchor && node.anchorSeq > nearestSeq) {
+      nearestSeq = node.anchorSeq
+      nearestKind = node.kind
+    }
+  }
+  return nearestKind === 'user'
+}
+
 /** Full props: framework runtime share + `voice` locale seat + injected face. */
 export type ReplySpeakerMountProps =
   PropsRuntime<'conversation.input.left'> & PropsLocale<'voice'> & VoiceInjected
@@ -99,11 +121,6 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
   const skipUntilRef = useRef(0)
   // Digital-human: nodes whose finished reply was already handed to the bridge.
   const dhSentRef = useRef(new Set<string>())
-  // Sticky flag: this session ever contained a tool-call node → it is an
-  // agent working session, not a plain chat. DUIX videos are for chat replies
-  // only, so once set, DH submissions are skipped (stops the flood of one
-  // video per agent tool-call output).
-  const seenToolCallRef = useRef(false)
   // DH mode (wait-for-video instead of immediate TTS): resolved once from the
   // bridge status (`enabled` + companion visible). null = not resolved yet.
   const dhModeRef = useRef<boolean | null>(null)
@@ -219,15 +236,9 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
       // LAST settled assistant node is a finished reply for the human — the
       // earlier steps are working noise that would flood the DUIX queue
       // (one video per tool call) and starve the real reply.
-      // Any tool-call node ever seen marks this session as an AGENT working
-      // session (tools doing things, interim text between calls): DUIX
-      // talking-head videos are for plain chat replies, so once tools are
-      // involved we stop feeding DUIX from this session. The flag is sticky
-      // (seenToolCallRef) so agent turns whose tool nodes have already been
-      // compacted away still count.
-      for (const node of snapshot.chat.nodes.values()) {
-        if (node.kind === 'tool-call') seenToolCallRef.current = true
-      }
+      // A reply is a plain chat reply (feeds DUIX) only when the nearest
+      // preceding non-assistant node is a USER node — replies that follow a
+      // tool-call are agent working output, not chat, and never spawn a video.
       const perTurnClosing = new Map<number, { node: { key: string; anchorSeq: number }; data: AssistantChatData; anchor: number }>()
       for (const node of snapshot.chat.nodes.values()) {
         if (node.kind !== 'assistant-step') continue
@@ -241,7 +252,7 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
         }
       }
       for (const { node, data } of perTurnClosing.values()) {
-        if (seenToolCallRef.current) continue // agent working session — not a chat reply
+        if (!isChatReply(snapshot, node.anchorSeq)) continue // agent working output
         if (node.anchorSeq <= baselineRef.current) continue
         if (node.anchorSeq === skipAnchorRef.current) continue
         if (dhSentRef.current.has(node.key)) continue

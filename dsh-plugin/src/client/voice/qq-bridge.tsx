@@ -44,15 +44,32 @@ function nodeText(data: AssistantChatData): string {
 }
 
 /**
+ * Whether an assistant node is a plain chat reply: the nearest PRECEDING
+ * non-assistant node must be a USER node. Replies following a tool-call are
+ * agent working output and never get voiced to QQ.
+ */
+function isChatReply(
+  snapshot: { chat: { nodes: { values(): readonly { kind: string; anchorSeq: number }[] } } },
+  anchor: number,
+): boolean {
+  let nearestSeq = -1
+  let nearestKind = ''
+  for (const node of snapshot.chat.nodes.values()) {
+    if (node.kind === 'assistant-step') continue
+    if (node.anchorSeq < anchor && node.anchorSeq > nearestSeq) {
+      nearestSeq = node.anchorSeq
+      nearestKind = node.kind
+    }
+  }
+  return nearestKind === 'user'
+}
+
+/**
  * @param props - framework runtime + locale + injected sendText.
  */
 export const QQBridge = memo(function QQBridge({ useSession, sendText }: QQBridgeProps) {
   const wsRef = useRef<WebSocket | null>(null)
   const lastReplyAnchorRef = useRef(0)
-  // Sticky flag: this session ever contained a tool-call node → it is an
-  // agent working session. Only plain chat replies are voiced to QQ; agent
-  // tool-call intermediates / interim text are not (matches the DUIX skip).
-  const seenToolCallRef = useRef(false)
   const snapshot = useSession(s => s)
 
   // WS connect with auto-reconnect (3s). Only one tab should run this (the
@@ -89,13 +106,11 @@ export const QQBridge = memo(function QQBridge({ useSession, sendText }: QQBridg
   }, [sendText])
 
   // New settled assistant reply -> push text to the bridge (it voices it to QQ).
-  // Skips entirely when the QQ push toggle is off. Agent working sessions
-  // (any tool-call seen) are skipped: only plain chat replies reach QQ.
+  // Skips entirely when the QQ push toggle is off. Only plain chat replies
+  // (nearest preceding non-assistant node is a USER node) reach QQ — agent
+  // working output (after tool-calls) is never voiced.
   useEffect(() => {
     if (!readQqPush()) return
-    for (const node of snapshot.chat.nodes.values()) {
-      if (node.kind === 'tool-call') seenToolCallRef.current = true
-    }
     let maxAnchor = 0
     let newest: { anchor: number; text: string } | null = null
     for (const node of snapshot.chat.nodes.values()) {
@@ -107,8 +122,9 @@ export const QQBridge = memo(function QQBridge({ useSession, sendText }: QQBridg
         newest = { anchor: node.anchorSeq, text: cleanReplyText(nodeText(data), 100000) }
       }
     }
-    if (seenToolCallRef.current) return // agent working session — no QQ voice
-    if (newest !== null && newest.anchor > lastReplyAnchorRef.current) {
+    if (newest === null) return
+    if (!isChatReply(snapshot, newest.anchor)) return // agent working output — no QQ voice
+    if (newest.anchor > lastReplyAnchorRef.current) {
       lastReplyAnchorRef.current = newest.anchor
       const text = newest.text.trim()
       if (text !== '') {
