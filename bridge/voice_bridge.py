@@ -497,9 +497,11 @@ def _scan_voices() -> dict[str, dict]:
 
 
 PERSONAS: dict[str, dict] = _scan_voices()
-_current_persona: str = "liang"
+# 默认音色：用户当前在用的（可改；不存在时回退到扫描到的第一个音色）。
+_default_voice = "xiaoya-hunan" if "xiaoya-hunan" in PERSONAS else next(iter(PERSONAS), "")
+_current_persona: str = _default_voice
 # 运行时形象覆盖（POST /api/persona/set {avatar} 手动指定时设置；None = 默认
-# avatar.mp4）。音色与形象完全独立切换。
+# 用 temp 下第一个可用形象或 avatar.mp4）。音色与形象完全独立切换。
 _avatar_override: str | None = None
 
 
@@ -507,6 +509,18 @@ def _persona_avatar() -> str:
     """当前数字人形象视频文件名（提交 DUIX 时用）。"""
     if _avatar_override is not None:
         return _avatar_override
+    # 默认形象：优先用户当前在用的 xiaoya-k17.mp4；不存在则取 temp 下第一个
+    # 非产物/非备份的 mp4；再兜底 avatar.mp4。
+    for preferred in ("xiaoya-k17.mp4",):
+        if (DH_TEMP_DIR / preferred).is_file():
+            return preferred
+    if DH_TEMP_DIR.is_dir():
+        for f in sorted(DH_TEMP_DIR.iterdir()):
+            if not f.is_file() or f.suffix.lower() != ".mp4":
+                continue
+            if f.name.endswith("-r.mp4") or f.name.endswith(".bak.mp4"):
+                continue
+            return f.name
     return DH_CFG.get("avatar_video", "avatar.mp4")
 
 # 生成的成品视频保留策略：磁盘上最多保留最近 max_keep 个 <uuid>-r.mp4，
@@ -1067,7 +1081,8 @@ class PersonaSetRequest(BaseModel):
 
 
 def _voice_entry(name: str) -> dict:
-    p = PERSONAS.get(name, PERSONAS["liang"])
+    fallback = next(iter(PERSONAS.values()), {})
+    p = PERSONAS.get(name, fallback)
     return {"name": name, "label": p.get("label", name), "current": name == _current_persona}
 
 
