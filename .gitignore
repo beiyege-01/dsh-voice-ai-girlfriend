@@ -20,9 +20,15 @@ bridge/bridge-config.json
 ref_audio.wav
 ref_audio.*
 
-# ---- Personal media assets (user-only, never uploaded) ----
-assets/bg-images/
-assets/task-videos/
+# ---- Personal media assets ----
+# bg-images/bg1 stays local (user-only); bg2/bg4/bg9/bg56 are committed presets.
+assets/bg-images/*
+!assets/bg-images/bg2/
+!assets/bg-images/bg4/
+!assets/bg-images/bg9/
+!assets/bg-images/bg56/
+assets/task-videos/*
+!assets/task-videos/README.md
 assets/*.mp4
 assets/*.jpg
 assets/*.png
