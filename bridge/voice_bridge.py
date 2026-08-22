@@ -365,20 +365,26 @@ TASK_VIDEOS_DIR = Path(CONFIG["media"]["task_videos_dir"])
 VIDEO_EXTS = {".mp4", ".webm", ".ogg", ".mov", ".m4v"}
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"}
 
-# ── 待机动画组预设（可扩展）────────────────────────────────────────────────
-# 每组是一个素材目录；切换只改 _current_idle 指向，列表/静态文件动态跟随。
-# 新增待机组：把目录加进 IDLE_GROUPS（或约定目录命名），无需改其它代码。
-IDLE_GROUPS: dict[str, Path] = {
-    "default": BG_IMAGES_DIR,
-    "bg56": Path("D:/speech-to-speech/hf-realtime-voice/bg-images56"),
-    "bg4": Path("D:/speech-to-speech/hf-realtime-voice/bg-images4"),
-    "bg9": Path("D:/speech-to-speech/hf-realtime-voice/bg-images9"),
-}
+# ── 待机动画组预设（统一从 bg-images 下子文件夹读取，动态扫描）──────────────
+# 约定：BG_IMAGES_DIR（bg-images）下的每个【子文件夹】= 一个待机动画组，
+# 文件夹名即组名；bg-images 根目录直接放的文件 = 默认组 "default"。
+# 新增待机组：在 bg-images 下新建子文件夹放视频/图片即可，**即时生效**——
+# 每次查询都重新扫描（不需要重启桥接）。没有文件的组自动隐藏。
+def _idle_groups() -> dict[str, Path]:
+    groups: dict[str, Path] = {"default": BG_IMAGES_DIR}
+    if BG_IMAGES_DIR.is_dir():
+        for entry in sorted(BG_IMAGES_DIR.iterdir()):
+            if entry.is_dir():
+                groups[entry.name] = entry
+    # 隐藏空组（default 根目录空也隐藏，避免切到空背景）
+    return {name: path for name, path in groups.items() if _list_media(path)}
+
+
 _current_idle: str = "default"
 
 
 def _idle_dir() -> Path:
-    return IDLE_GROUPS.get(_current_idle, BG_IMAGES_DIR)
+    return _idle_groups().get(_current_idle, BG_IMAGES_DIR)
 
 
 def _list_media(directory: Path) -> list[dict]:
@@ -449,6 +455,9 @@ DH_ENABLED = bool(DH_CFG.get("enabled", False))
 DH_DUIX_BASE = DH_CFG.get("duix_base", "http://127.0.0.1:8383").rstrip("/")
 DH_DATA_DIR = Path(DH_CFG.get("data_dir", "D:/duix_avatar_data/face2face"))
 DH_TEMP_DIR = DH_DATA_DIR / DH_CFG.get("temp_dir", "temp")
+# 生成产物子目录：数字人成品视频（<uuid>-r.mp4）统一放这里，与 temp 根目录的
+# 形象素材 / 输入音频分开。形象文件（avatar*.mp4 / 自定义名.mp4）仍在 temp 根。
+DH_OUTPUT_DIR = DH_TEMP_DIR / "output"
 DH_AVATAR = DH_CFG.get("avatar_video", "avatar.mp4")
 DH_SUBMIT_RETRY_SEC = float(DH_CFG.get("submit_retry_sec", 5))
 DH_QUERY_INTERVAL = float(DH_CFG.get("query_interval_sec", 2))
@@ -458,28 +467,39 @@ DH_MAX_KEEP = int(DH_CFG.get("max_keep", 10))
 DH_SEGMENT_CHARS = int(DH_CFG.get("segment_chars", 48))
 DH_MAX_TEXT = 1000
 
-# ── 人设预设（音色 + 数字人形象 组合）─────────────────────────────────────────
-# 每个预设：ref_audio/ref_text = TTS 参考音色（热切换：改 handler 属性即生效），
-# avatar = 数字人形象视频文件名（放 DH_TEMP_DIR 下，DUIX 提交时指定）。
-# 切换通过 POST /api/persona/set {name}；当前选择存 _current_persona（内存态，
-# 重启回默认；插件端可用 localStorage 记住并在启动时 set 一次）。
-PERSONAS: dict[str, dict] = {
-    "liang": {
-        "label": "梁文锋",
-        "ref_audio": CONFIG["tts"].get("ref_audio", ""),
-        "ref_text": CONFIG["tts"].get("ref_text", ""),
-        "avatar": DH_CFG.get("avatar_video", "avatar.mp4"),
-    },
-    "xiaoya-k17": {
-        "label": "小雅复制体K17",
-        "ref_audio": r"D:\speech-to-speech\backup\ref-audio\小雅台版).wav",
-        "ref_text": "靠北啦，不想聊就不聊咯，摆什么臭架子哦，真以为自己很厉害，真以为自己很好看，我也是这么觉得啦，明天继续叫你好不好，笨蛋",
-        "avatar": "avatar_新形象.mp4",
-    },
-}
+# ── TTS 音色预设（统一从 voices 大文件夹下子文件夹读取）────────────────────
+# 约定：VOICES_DIR（voices）下的每个【子文件夹】= 一个音色，文件夹名即音色名；
+# 子文件夹内放 ref_audio.wav（参考音频）+ ref_text.txt（对应文本，UTF-8）。
+# 新增音色：在 voices 下新建子文件夹放这两个文件即可，启动时自动扫描。
+VOICES_DIR = Path("D:/speech-to-speech/voices")
+AUDIO_EXTS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac"}
+TEXT_EXTS = {".txt", ".text"}
+
+
+def _scan_voices() -> dict[str, dict]:
+    voices: dict[str, dict] = {}
+    if VOICES_DIR.is_dir():
+        for entry in sorted(VOICES_DIR.iterdir()):
+            if not entry.is_dir():
+                continue
+            name = entry.name
+            audio = next((f for f in entry.iterdir() if f.suffix.lower() in AUDIO_EXTS), None)
+            text = next((f for f in entry.iterdir() if f.suffix.lower() in TEXT_EXTS), None)
+            if audio is None:
+                continue  # 无参考音频的子文件夹跳过
+            ref_text = text.read_text(encoding="utf-8", errors="ignore").strip() if text is not None else ""
+            voices[name] = {
+                "label": name,
+                "ref_audio": str(audio),
+                "ref_text": ref_text,
+            }
+    return voices
+
+
+PERSONAS: dict[str, dict] = _scan_voices()
 _current_persona: str = "liang"
-# 运行时形象覆盖（POST /api/persona/set {avatar} 手动指定时设置；None = 用
-# 当前音色预设绑定的形象）。这样音色与形象可独立切换。
+# 运行时形象覆盖（POST /api/persona/set {avatar} 手动指定时设置；None = 默认
+# avatar.mp4）。音色与形象完全独立切换。
 _avatar_override: str | None = None
 
 
@@ -487,7 +507,7 @@ def _persona_avatar() -> str:
     """当前数字人形象视频文件名（提交 DUIX 时用）。"""
     if _avatar_override is not None:
         return _avatar_override
-    return PERSONAS.get(_current_persona, PERSONAS["liang"]).get("avatar", "avatar.mp4")
+    return DH_CFG.get("avatar_video", "avatar.mp4")
 
 # 生成的成品视频保留策略：磁盘上最多保留最近 max_keep 个 <uuid>-r.mp4，
 # 超出删除最旧的（不碰 avatar.mp4 / 输入音频 / 形象底版）。
@@ -495,12 +515,28 @@ def _persona_avatar() -> str:
 _dh_history: list[dict] = []
 
 
+def _dh_move_to_output(host_path: Path) -> str | None:
+    """把 DUIX 产物（temp 根下的 -r.mp4）挪到 output 子目录；返回文件名或 None。"""
+    if not host_path.is_file():
+        return None
+    try:
+        DH_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        target = DH_OUTPUT_DIR / host_path.name
+        if target.exists():
+            target.unlink()
+        host_path.replace(target)
+        return target.name
+    except Exception:  # noqa: BLE001
+        logger.exception("DH move to output failed on %s", host_path)
+        return host_path.name
+
+
 def _dh_prune_videos() -> None:
-    """把 temp 下的成品视频修剪到最近 max_keep 个（新的在前，删旧的）。"""
-    if not DH_TEMP_DIR.is_dir():
+    """把 output 子目录下的成品视频修剪到最近 max_keep 个（新的在前，删旧的）。"""
+    if not DH_OUTPUT_DIR.is_dir():
         return
     files = sorted(
-        (p for p in DH_TEMP_DIR.glob("*-r.mp4") if p.is_file()),
+        (p for p in DH_OUTPUT_DIR.glob("*-r.mp4") if p.is_file()),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
@@ -900,8 +936,9 @@ async def _dh_submit_and_wait(
                 if host.is_file():
                     break
                 await asyncio.sleep(1)
-            logger.info("DH %s: segment done -> %s", seg_code, fname)
-            return fname
+            moved = _dh_move_to_output(host)
+            logger.info("DH %s: segment done -> %s", seg_code, moved or fname)
+            return moved or fname
         if status in ("3", "error", "e", "failed", "失败"):
             _dh_set(state="error", message=f"生成失败: {q.get('msg')}", code=reply_code, text=reply_text)
             return None
@@ -909,8 +946,9 @@ async def _dh_submit_and_wait(
         if status not in ("1", "run", "r", "running", "运行") and q.get("result"):
             fname = str(q.get("result")).rsplit("/", 1)[-1]
             if (DH_TEMP_DIR / fname).is_file():
-                logger.info("DH %s: segment done (result field) -> %s", seg_code, fname)
-                return fname
+                moved = _dh_move_to_output(DH_TEMP_DIR / fname)
+                logger.info("DH %s: segment done (result field) -> %s", seg_code, moved or fname)
+                return moved or fname
     _dh_set(state="error", message="生成超时", code=reply_code, text=reply_text)
     return None
 
@@ -995,7 +1033,10 @@ async def _dh_warmup() -> None:
                     break
             host = DH_TEMP_DIR / fname if fname else None
             if host is not None:
-                host.unlink(missing_ok=True)
+                # 挪到 output 子目录再删（保持 temp 根只有形象素材）
+                moved = _dh_move_to_output(host)
+                if moved is not None:
+                    (DH_OUTPUT_DIR / moved).unlink(missing_ok=True)
             wav.unlink(missing_ok=True)
             logger.info("DH warmup: done (prewarmed TTS/wenet/DUIX)%s", f" {fname} cleaned" if fname else "")
     except Exception:  # noqa: BLE001
@@ -1003,8 +1044,10 @@ async def _dh_warmup() -> None:
 
 
 # 结果视频静态挂载：插件 video 元素直接播 /media/dh/<uuid>-r.mp4（Range 支持）。
+# 产物统一在 output 子目录（与形象素材分离）。
 if DH_ENABLED and DH_TEMP_DIR.is_dir():
-    app.mount("/media/dh", StaticFiles(directory=str(DH_TEMP_DIR)), name="media-dh")
+    DH_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    app.mount("/media/dh", StaticFiles(directory=str(DH_OUTPUT_DIR)), name="media-dh")
 
 
 # ── 人设/预设切换（音色 + 数字人形象 + 待机动画，三类独立）─────────────────
@@ -1031,18 +1074,21 @@ def _voice_entry(name: str) -> dict:
 @app.get("/api/persona/list")
 async def persona_list() -> dict:
     voices = [_voice_entry(n) for n in PERSONAS]
-    # 形象：扫描 temp 目录下的 avatar*.mp4（含人工放入的）
+    # 形象：扫描 temp 目录下的 mp4 形象文件（任意命名，排除生成产物 -r.mp4
+    # 与备份 .bak.mp4）。名字即文件名（去扩展名）。
     avatar_files = []
     if DH_TEMP_DIR.is_dir():
-        for f in sorted(DH_TEMP_DIR.glob("avatar*.mp4")):
+        for f in sorted(DH_TEMP_DIR.iterdir()):
+            if not f.is_file() or f.suffix.lower() != ".mp4":
+                continue
             if f.name.endswith("-r.mp4") or f.name.endswith(".bak.mp4"):
                 continue  # 跳过生成产物与备份
             avatar_files.append({
                 "name": f.name,
-                "label": f.name.replace("avatar", "").replace(".mp4", "").strip() or "默认",
+                "label": f.stem,
                 "current": f.name == _persona_avatar(),
             })
-    idles = [{"name": n, "label": n, "current": n == _current_idle} for n in IDLE_GROUPS]
+    idles = [{"name": n, "label": n, "current": n == _current_idle} for n in _idle_groups()]
     return {
         "voices": voices,
         "avatars": avatar_files,
@@ -1073,9 +1119,7 @@ async def persona_set(req: PersonaSetRequest) -> dict:
         except HTTPException:
             logger.warning("persona set: TTS not ready, switching voice config only")
         _current_persona = name
-        # 切音色时，若本次未同时指定形象，则形象回到该预设绑定的默认
-        if req.avatar is None:
-            _avatar_override = None
+        # 音色与形象完全独立：切音色不影响当前形象选择。
         result["voice"] = name
         logger.info("voice switched to %s", name)
 
@@ -1091,7 +1135,7 @@ async def persona_set(req: PersonaSetRequest) -> dict:
     # 待机动画切换
     if req.idle is not None:
         name = req.idle.strip()
-        if name not in IDLE_GROUPS:
+        if name not in _idle_groups():
             raise HTTPException(status_code=404, detail=f"Unknown idle group: {name}")
         _current_idle = name
         result["idle"] = name

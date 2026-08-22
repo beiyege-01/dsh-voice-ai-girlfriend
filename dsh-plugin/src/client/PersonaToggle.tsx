@@ -1,9 +1,12 @@
 /**
- * PersonaToggle: three independent preset switchers for the voice stack —
+ * PersonaToggle: three independent preset selectors for the voice stack —
  * TTS voice, digital-human avatar, and companion idle animation group.
  *
- * Each is a small toolbar button that cycles through the bridge's preset
- * list on click (voice → next voice, avatar → next avatar, idle → next idle).
+ * Each is a labelled capsule (icon + current value) that cycles through the
+ * bridge's preset list on click. Visually distinct from the icon-only toggle
+ * buttons: it has its own filled pill background, a short text label, and a
+ * tooltip explaining what it switches and what the next value will be.
+ *
  * Selections persist in localStorage (`s2s.voice.persona.*`) and are restored
  * by POSTing them to the bridge on mount. The bridge applies voice hot-swap
  * (next TTS uses the new ref), avatar (next DUIX submission uses the new
@@ -46,10 +49,15 @@ function writeSaved(key: string, value: string): void {
   }
 }
 
+/** Short label: strip the "avatar" prefix and extension for the pill text. */
+function avatarLabel(name: string): string {
+  return name.replace(/^avatar/, '').replace(/\.mp4$/i, '').trim() || '默认'
+}
+
 /** Small SVG glyphs (inline, follow currentColor). */
 function VoiceIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
       <path d="M19 10v1a7 7 0 0 1-14 0v-1" />
       <line x1="12" y1="18" x2="12" y2="22" />
@@ -59,7 +67,7 @@ function VoiceIcon() {
 
 function AvatarIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
       <circle cx="12" cy="7" r="4" />
     </svg>
@@ -68,7 +76,7 @@ function AvatarIcon() {
 
 function IdleIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect x="2" y="4" width="20" height="16" rx="2" />
       <path d="M2 9h20" />
       <circle cx="6" cy="13" r="1.2" />
@@ -77,10 +85,21 @@ function IdleIcon() {
   )
 }
 
+type Kind = 'voice' | 'avatar' | 'idle'
+
+const KIND_META: Record<Kind, { key: keyof PersonaState['current']; icon: () => JSX.Element; hintKey: 'persona.voiceHint' | 'persona.avatarHint' | 'persona.idleHint' }> = {
+  voice: { key: 'voice', icon: VoiceIcon, hintKey: 'persona.voiceHint' },
+  avatar: { key: 'avatar', icon: AvatarIcon, hintKey: 'persona.avatarHint' },
+  idle: { key: 'idle', icon: IdleIcon, hintKey: 'persona.idleHint' },
+}
+
 export const PersonaToggle = memo(function PersonaToggle({ t }: PropsRuntime<'conversation.input.dock'> & PropsLocale<'voice'> & VoiceInjected) {
   const [state, setState] = useState<PersonaState | null>(null)
   const [applied, setApplied] = useState(false)
   const appliedRef = useRef(false)
+  const aliveRef = useRef(true)
+
+  useEffect(() => () => { aliveRef.current = false }, [])
 
   // Load the preset list once.
   useEffect(() => {
@@ -113,22 +132,17 @@ export const PersonaToggle = memo(function PersonaToggle({ t }: PropsRuntime<'co
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
     })
-      .then(() => {
-        // Refresh the list so current reflects the restore.
-        return fetch(`${bridgeBase()}/api/persona/list`).then(r => r.json() as Promise<PersonaState>)
-      })
-      .then((s) => { if (!cancelledRef.current) setState(s) })
+      .then(() => fetch(`${bridgeBase()}/api/persona/list`).then(r => r.json() as Promise<PersonaState>))
+      .then((s) => { if (aliveRef.current) setState(s) })
       .catch(err => console.error('[ui-voice] persona restore failed:', err))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [applied, state])
 
-  const cancelledRef = useRef(false)
-  useEffect(() => () => { cancelledRef.current = true }, [])
-
-  const cycle = useCallback((kind: 'voice' | 'avatar' | 'idle', current: string) => {
+  const cycle = useCallback((kind: Kind) => {
     if (state === null) return
+    const meta = KIND_META[kind]
     const list = kind === 'voice' ? state.voices : kind === 'avatar' ? state.avatars : state.idles
     if (list.length === 0) return
+    const current = state.current[meta.key]
     const idx = list.findIndex(x => x.name === current)
     const next = list[(idx + 1) % list.length]
     if (next === undefined) return
@@ -140,45 +154,53 @@ export const PersonaToggle = memo(function PersonaToggle({ t }: PropsRuntime<'co
       body: JSON.stringify(patch),
     })
       .then(() => fetch(`${bridgeBase()}/api/persona/list`).then(r => r.json() as Promise<PersonaState>))
-      .then((s) => { if (!cancelledRef.current) setState(s) })
+      .then((s) => {
+        if (!aliveRef.current) return
+        setState(s)
+        // 通知 companion 立即刷新待机动画（不等 30s 轮询）。
+        window.dispatchEvent(new CustomEvent('dsh-voice:persona', { detail: { kind, name: next.name } }))
+      })
       .catch(err => console.error(`[ui-voice] persona ${kind} switch failed:`, err))
   }, [state])
 
   if (state === null) return null
 
-  const curVoice = state.voices.find(v => v.name === state.current.voice) ?? state.voices[0]
-  const curAvatar = state.avatars.find(a => a.name === state.current.avatar) ?? state.avatars[0]
-  const curIdle = state.idles.find(i => i.name === state.current.idle) ?? state.idles[0]
+  const currentVoice = state.current.voice
+  const currentAvatar = state.current.avatar
+  const currentIdle = state.current.idle
+  const voiceLabel = state.voices.find(v => v.name === currentVoice)?.label ?? currentVoice
+  const avatarLabelText = avatarLabel(currentAvatar)
+  const idleLabel = state.idles.find(i => i.name === currentIdle)?.label ?? currentIdle
+
+  const pill = (kind: Kind, label: string, current: string) => {
+    const meta = KIND_META[kind]
+    const Icon = meta.icon
+    const nextName = (() => {
+      const list = kind === 'voice' ? state.voices : kind === 'avatar' ? state.avatars : state.idles
+      const idx = list.findIndex(x => x.name === current)
+      const next = list[(idx + 1) % list.length]
+      return next?.label ?? ''
+    })()
+    const hint = t(meta.hintKey)
+    return (
+      <button
+        type="button"
+        className={css.pill}
+        title={`${hint}：当前「${label}」，点击切换到「${nextName}」`}
+        aria-label={`${hint}：${label}`}
+        onClick={() => cycle(kind)}
+      >
+        <span className={css.icon}><Icon /></span>
+        <span className={css.label}>{label}</span>
+      </button>
+    )
+  }
 
   return (
     <>
-      <button
-        type="button"
-        className={css.personaBtn}
-        title={`${t('persona.voiceHint')}: ${curVoice?.label ?? ''}（点击切换）`}
-        aria-label={t('persona.voiceHint')}
-        onClick={() => cycle('voice', state.current.voice)}
-      >
-        <VoiceIcon />
-      </button>
-      <button
-        type="button"
-        className={css.personaBtn}
-        title={`${t('persona.avatarHint')}: ${curAvatar?.label ?? ''}（点击切换）`}
-        aria-label={t('persona.avatarHint')}
-        onClick={() => cycle('avatar', state.current.avatar)}
-      >
-        <AvatarIcon />
-      </button>
-      <button
-        type="button"
-        className={css.personaBtn}
-        title={`${t('persona.idleHint')}: ${curIdle?.label ?? ''}（点击切换）`}
-        aria-label={t('persona.idleHint')}
-        onClick={() => cycle('idle', state.current.idle)}
-      >
-        <IdleIcon />
-      </button>
+      {pill('voice', voiceLabel, currentVoice)}
+      {pill('avatar', avatarLabelText, currentAvatar)}
+      {pill('idle', idleLabel, currentIdle)}
     </>
   )
 })

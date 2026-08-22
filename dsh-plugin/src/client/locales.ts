@@ -19,9 +19,9 @@ export const zh = {
   'balance.hint': 'DeepSeek 余额（点击刷新）',
   'balance.errHint': '余额查询失败，点击重试',
   'balance.loading': '余额加载中…',
-  'persona.voiceHint': '切换音色',
-  'persona.avatarHint': '切换数字人形象',
-  'persona.idleHint': '切换待机动画',
+  'persona.voiceHint': 'TTS 音色（说话的声音）',
+  'persona.avatarHint': '数字人形象（说话的样子）',
+  'persona.idleHint': '待机动画（发呆时的背景）',
 } satisfies Record<string, string>
 
 /** The voice namespace key union. */
@@ -46,7 +46,7 @@ export const en = {
   'balance.hint': 'DeepSeek balance (click to refresh)',
   'balance.errHint': 'Balance query failed, click to retry',
   'balance.loading': 'Loading balance…',
-  'persona.voiceHint': 'Switch TTS voice',
-  'persona.avatarHint': 'Switch digital-human avatar',
-  'persona.idleHint': 'Switch idle animation',
+  'persona.voiceHint': 'TTS voice (the speaking voice)',
+  'persona.avatarHint': 'Digital-human avatar (the speaking look)',
+  'persona.idleHint': 'Idle animation (the background while resting)',
 } satisfies Record<VoiceKey, string>

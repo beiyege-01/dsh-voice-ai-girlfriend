@@ -102,24 +102,28 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
       try {
         const base = bridgeBase()
         const [bg, task] = await Promise.all([
-          fetch(`${base}/api/media/bg-images`).then((r) => r.json() as Promise<{ media: { name: string; type: string }[] }>),
-          fetch(`${base}/api/media/task-videos`).then((r) => r.json() as Promise<{ videos: string[] }>),
+          fetch(`${base}/api/media/bg-images`).then(r => r.json() as Promise<{ media: { name: string; type: string }[] }>),
+          fetch(`${base}/api/media/task-videos`).then(r => r.json() as Promise<{ videos: string[] }>),
         ])
         if (cancelled) return
         const json = JSON.stringify([bg.media, task.videos])
         if (json === mediaJsonRef.current) return
         mediaJsonRef.current = json
-        setBgVideos(bg.media.filter((m) => m.type === 'video').map((m) => `${base}/media/bg-images/${encodeURIComponent(m.name)}`))
-        setTaskVideos(task.videos.map((name) => `${base}/media/task-videos/${encodeURIComponent(name)}`))
+        setBgVideos(bg.media.filter(m => m.type === 'video').map(m => `${base}/media/bg-images/${encodeURIComponent(m.name)}`))
+        setTaskVideos(task.videos.map(name => `${base}/media/task-videos/${encodeURIComponent(name)}`))
       } catch (err) {
         console.error('[ui-voice] companion media list failed:', err)
       }
     }
     void load()
     const timer = window.setInterval(load, 30000)
+    // 外部通知（PersonaToggle 切换待机动画时触发）：立即重新拉取，不等 30s 轮询。
+    const onPersonaChange = () => { void load() }
+    window.addEventListener('dsh-voice:persona', onPersonaChange)
     return () => {
       cancelled = true
       window.clearInterval(timer)
+      window.removeEventListener('dsh-voice:persona', onPersonaChange)
     }
   }, [])
 
@@ -141,7 +145,7 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
   const wasSpeakingRef = useRef(false)
   useEffect(() => {
     if (speaking && !wasSpeakingRef.current && taskVideos.length > 0) {
-      setTaskIndex((i) => (i + 1) % taskVideos.length)
+      setTaskIndex(i => (i + 1) % taskVideos.length)
     }
     wasSpeakingRef.current = speaking
   }, [speaking, taskVideos.length])
@@ -259,8 +263,8 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
       stopDh()
       if (status.text) {
         void tts(status.text)
-          .then((wav) => speaker.speak(wav))
-          .catch((err) => console.error('[ui-voice] DH fallback TTS failed:', err))
+          .then(wav => speaker.speak(wav))
+          .catch(err => console.error('[ui-voice] DH fallback TTS failed:', err))
       }
       return
     }
@@ -281,8 +285,8 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
         stopDh()
         if (status.text) {
           void tts(status.text)
-            .then((wav) => speaker.speak(wav))
-            .catch((err) => console.error('[ui-voice] DH timeout TTS failed:', err))
+            .then(wav => speaker.speak(wav))
+            .catch(err => console.error('[ui-voice] DH timeout TTS failed:', err))
         }
         return
       }
@@ -329,7 +333,7 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
   }, [playNextDh, setDhPlayingBoth])
 
   const onIdleEnded = useCallback(() => {
-    if (bgVideos.length > 1) setBgIndex((i) => (i + 1) % bgVideos.length)
+    if (bgVideos.length > 1) setBgIndex(i => (i + 1) % bgVideos.length)
   }, [bgVideos.length])
 
   const onSpeakEnded = useCallback(() => {
