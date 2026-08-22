@@ -9,9 +9,9 @@
 #   - 挂载 config.ini（宿主可改、容器重建不丢）：chaofen=0 关超分、batch_size=2
 #
 # 提速（实测 7.3s 音频：20.1s → 14.1s，-30%，GPU 96% 满载时帧数是主瓶颈）：
-#   - 形象视频换 15fps（输出规格跟随 avatar.mp4）：
-#       ffmpeg -i avatar.mp4 -vf fps=15 -c:v libx264 -crf 20 -preset fast -an avatar_15fps.mp4
-#     改名 avatar.mp4 即可（原版备份）。1080p 画质不降，帧数 -37% → 提速约 30%。
+#   - 形象视频换 15fps（输出规格跟随形象视频）：
+#       ffmpeg -i my_avatar.mp4 -vf fps=15 -c:v libx264 -crf 20 -preset fast -an my_avatar_15fps.mp4
+#     改名 my_avatar.mp4 即可（原版备份）。1080p 画质不降，帧数 -37% → 提速约 30%。
 #   - config.ini [digital] chaofen = 0（已默认，关超分再快约 10%）。
 #
 # 使用：

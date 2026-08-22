@@ -316,10 +316,10 @@ venv-speech\Scripts\python.exe bridge\smoke_tts.py --text "你好，我是小雅
 
 2. **手动跑**：拉取 `guiji2025/duix.avatar-5090` 镜像后 `python /code/app_local.py`（容器内）。
 
-**配置**（`bridge-config.json` → `digital_human` 段）：`duix_base` 服务地址、`avatar_video` 形象视频（放共享卷 temp，如 `avatar.mp4`）、`segment_chars` 分段字数（默认 48 ≈ 10s）、`max_keep` 保留条数（默认 200）。
+**配置**（`bridge-config.json` → `digital_human` 段）：`duix_base` 服务地址、`avatar_video` 形象视频（放共享卷 temp，如 `my_avatar.mp4`）、`segment_chars` 分段字数（默认 48 ≈ 10s）、`max_keep` 保留条数（默认 200）。
 
 **提速技巧**（实测：7.3s 音频 20.1s → 14.1s，约 -30%）：
-- **形象视频换 15fps**（输出规格跟随 avatar.mp4，1080p 画质不降）：`ffmpeg -i avatar.mp4 -vf fps=15 -c:v libx264 -crf 20 -preset fast -an avatar_15fps.mp4` 改名 avatar.mp4（原版备份）。
+- **形象视频换 15fps**（输出规格跟随形象视频，1080p 画质不降）：`ffmpeg -i my_avatar.mp4 -vf fps=15 -c:v libx264 -crf 20 -preset fast -an my_avatar_15fps.mp4` 改名 my_avatar.mp4（原版备份）。
 - **关超分**：共享卷放一份 `config.ini`（`[digital] chaofen = 0, batch_size = 2`，compose 已挂载 `/code/config/config.ini`），容器重建不丢，再快约 10%。
 
 **开关**：工具行「数字人」按钮——开：等视频生成完，TTS+画面同步播放；关：去掉视频生成，回到接近即时的纯语音朗读。
@@ -434,7 +434,7 @@ WebUI → 网络配置：
 
 7. **女友窗不显示** → 确认 `assets/` 目录存在、桥接已启动（窗口每 30s 拉一次素材列表）。
 
-8. **数字人没出视频** → 检查：① 工具行数字人开关是否打开；② `bridge-config.json` 的 `digital_human.enabled` 是否为 true、`duix_base` 是否指向 DUIX 服务；③ 形象视频 `avatar.mp4` 是否放在共享卷 temp 目录（DUIX 容器映射的 `D:\duix_avatar_data\face2face\temp\`）；④ 生成状态用 `GET http://127.0.0.1:8765/api/dh/status` 查看（done 且带 video_url 即为就绪）。
+8. **数字人没出视频** → 检查：① 工具行数字人开关是否打开；② `bridge-config.json` 的 `digital_human.enabled` 是否为 true、`duix_base` 是否指向 DUIX 服务；③ 形象视频（`avatar_video` 配置的文件名，如 `my_avatar.mp4`）是否放在共享卷 temp 目录（DUIX 容器映射的 `D:\duix_avatar_data\face2face\temp\`）；④ 生成状态用 `GET http://127.0.0.1:8765/api/dh/status` 查看（done 且带 video_url 即为就绪）。
 
 9. **数字人视频生成了但没播** → 刷新 DSH 页面（插件逻辑更新后需刷新加载）；确认女友窗可见。生成中窗口底部会显示「数字人生成中 i/n…」，一段播完自动续接下一段。
 

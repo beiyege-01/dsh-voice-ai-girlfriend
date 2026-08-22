@@ -442,7 +442,7 @@ async def media_bg_file(name: str):
 #
 # 回复结束 → 插件调 /api/dh/speak {text} → 桥接用 Qwen3 TTS 整段合成 →
 # 写入共享卷 temp（宿主 D:\duix_avatar_data\face2face\temp = 容器 /code/data/temp）
-# → POST DUIX /easy/submit（audio_url=裸文件名, video_url=avatar.mp4）→
+# → POST DUIX /easy/submit（audio_url=裸文件名, video_url=形象文件名）→
 # 轮询 /easy/query 直到 success → 最终视频 <uuid>-r.mp4 落在宿主 temp 下，
 # 容器已把 TTS 声音混入视频（ffmpeg -c:a aac），播放该 mp4 即音画同步。
 #
@@ -458,7 +458,7 @@ DH_TEMP_DIR = DH_DATA_DIR / DH_CFG.get("temp_dir", "temp")
 # 生成产物子目录：数字人成品视频（<uuid>-r.mp4）统一放这里，与 temp 根目录的
 # 形象素材 / 输入音频分开。形象文件（avatar*.mp4 / 自定义名.mp4）仍在 temp 根。
 DH_OUTPUT_DIR = DH_TEMP_DIR / "output"
-DH_AVATAR = DH_CFG.get("avatar_video", "avatar.mp4")
+DH_AVATAR = DH_CFG.get("avatar_video", "")
 DH_SUBMIT_RETRY_SEC = float(DH_CFG.get("submit_retry_sec", 5))
 DH_QUERY_INTERVAL = float(DH_CFG.get("query_interval_sec", 2))
 DH_QUERY_TIMEOUT = float(DH_CFG.get("query_timeout_sec", 240))
@@ -501,19 +501,22 @@ PERSONAS: dict[str, dict] = _scan_voices()
 _default_voice = "xiaoya-hunan" if "xiaoya-hunan" in PERSONAS else next(iter(PERSONAS), "")
 _current_persona: str = _default_voice
 # 运行时形象覆盖（POST /api/persona/set {avatar} 手动指定时设置；None = 默认
-# 用 temp 下第一个可用形象或 avatar.mp4）。音色与形象完全独立切换。
+# 用配置 avatar_video 或 temp 下第一个可用形象）。音色与形象完全独立切换。
 _avatar_override: str | None = None
 
 
 def _persona_avatar() -> str:
-    """当前数字人形象视频文件名（提交 DUIX 时用）。"""
+    """当前数字人形象视频文件名（提交 DUIX 时用）。
+
+    优先级：运行时覆盖 → 配置 avatar_video → temp 下第一个非产物/非备份的
+    mp4（用户放的形象素材）。都不存在时返回空（调用方会报错提示放形象）。
+    素材文件（avatar*.mp4 / 自定义名.mp4）由用户放入 temp，不随代码分发。
+    """
     if _avatar_override is not None:
         return _avatar_override
-    # 默认形象：优先用户当前在用的 xiaoya-k17.mp4；不存在则取 temp 下第一个
-    # 非产物/非备份的 mp4；再兜底 avatar.mp4。
-    for preferred in ("xiaoya-k17.mp4",):
-        if (DH_TEMP_DIR / preferred).is_file():
-            return preferred
+    configured = DH_CFG.get("avatar_video", "")
+    if configured and (DH_TEMP_DIR / configured).is_file():
+        return configured
     if DH_TEMP_DIR.is_dir():
         for f in sorted(DH_TEMP_DIR.iterdir()):
             if not f.is_file() or f.suffix.lower() != ".mp4":
@@ -521,10 +524,10 @@ def _persona_avatar() -> str:
             if f.name.endswith("-r.mp4") or f.name.endswith(".bak.mp4"):
                 continue
             return f.name
-    return DH_CFG.get("avatar_video", "avatar.mp4")
+    return configured
 
 # 生成的成品视频保留策略：磁盘上最多保留最近 max_keep 个 <uuid>-r.mp4，
-# 超出删除最旧的（不碰 avatar.mp4 / 输入音频 / 形象底版）。
+# 超出删除最旧的（不碰形象素材 / 输入音频）。
 # 内存里存一份最近完成任务的 {code,file,url,text,time} 供 /api/dh/history 回放。
 _dh_history: list[dict] = []
 
