@@ -1,0 +1,19 @@
+.personaBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-dimmed);
+  cursor: pointer;
+  transition: color 0.2s ease, background 0.2s ease;
+}
+
+.personaBtn:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}

@@ -26,7 +26,7 @@ networks:
 
 services:
   duix-avatar-gen-video:
-    image: guiji2025/duix.avatar-5090:trt10.9
+    image: guiji2025/duix.avatar-5090
     container_name: duix-avatar-gen-video
     restart: always
     privileged: true
@@ -35,10 +35,6 @@ services:
       - d:/duix_avatar_data/face2face/config.ini:/code/config/config.ini
     environment:
       - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
-      # onnxruntime CUDA/TRT provider 需要这些库在 LD_LIBRARY_PATH 里，否则
-      # 全部 fallback 到 CPU（实测可差 3-10x）。nvidia pip 包的 lib 目录：
-      # tensorrt_libs 是 tensorrt-cu12==10.9.0.34 的库（匹配 ORT 1.19 的 so.10）：
-      - LD_LIBRARY_PATH=/usr/local/lib/python3.9/dist-packages/tensorrt_libs:/usr/local/lib/python3.9/dist-packages/nvidia/cudnn/lib:/usr/local/lib/python3.9/dist-packages/nvidia/cublas/lib:/usr/local/lib/python3.9/dist-packages/nvidia/curand/lib:/usr/local/lib/python3.9/dist-packages/nvidia/cufft/lib:/usr/local/lib/python3.9/dist-packages/nvidia/cuda_nvrtc/lib:/usr/local/lib/python3.9/dist-packages/nvidia/cuda_runtime/lib:/usr/local/lib/python3.9/dist-packages/nvidia/cusolver/lib:/usr/local/lib/python3.9/dist-packages/nvidia/cusparse/lib:/usr/local/lib/python3.9/dist-packages/nvidia/nvjitlink/lib:/usr/local/lib/python3.9/dist-packages/nvidia/nccl/lib:/usr/local/lib/python3.9/dist-packages/nvidia/nvtx/lib:/usr/local/lib/python3.9/dist-packages/nvidia/cuda_cupti/lib:/usr/local/lib/python3.9/dist-packages/nvidia/cufile/lib
     deploy:
       resources:
         reservations:

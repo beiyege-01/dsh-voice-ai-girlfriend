@@ -365,6 +365,21 @@ TASK_VIDEOS_DIR = Path(CONFIG["media"]["task_videos_dir"])
 VIDEO_EXTS = {".mp4", ".webm", ".ogg", ".mov", ".m4v"}
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"}
 
+# ── 待机动画组预设（可扩展）────────────────────────────────────────────────
+# 每组是一个素材目录；切换只改 _current_idle 指向，列表/静态文件动态跟随。
+# 新增待机组：把目录加进 IDLE_GROUPS（或约定目录命名），无需改其它代码。
+IDLE_GROUPS: dict[str, Path] = {
+    "default": BG_IMAGES_DIR,
+    "bg56": Path("D:/speech-to-speech/hf-realtime-voice/bg-images56"),
+    "bg4": Path("D:/speech-to-speech/hf-realtime-voice/bg-images4"),
+    "bg9": Path("D:/speech-to-speech/hf-realtime-voice/bg-images9"),
+}
+_current_idle: str = "default"
+
+
+def _idle_dir() -> Path:
+    return IDLE_GROUPS.get(_current_idle, BG_IMAGES_DIR)
+
 
 def _list_media(directory: Path) -> list[dict]:
     if not directory.is_dir():
@@ -381,8 +396,8 @@ def _list_media(directory: Path) -> list[dict]:
 
 @app.get("/api/media/bg-images")
 async def media_bg_images() -> dict:
-    """Idle/background media list (videos + images, name-sorted)."""
-    return {"media": _list_media(BG_IMAGES_DIR)}
+    """Idle/background media list (current idle group, name-sorted)."""
+    return {"media": _list_media(_idle_dir())}
 
 
 @app.get("/api/media/task-videos")
@@ -398,10 +413,23 @@ async def media_task_videos() -> dict:
 
 
 # Static mounts (Range-capable) for the companion window's <video> sources.
-if BG_IMAGES_DIR.is_dir():
-    app.mount("/media/bg-images", StaticFiles(directory=str(BG_IMAGES_DIR)), name="media-bg")
+# bg 用动态路由：文件从「当前待机组」目录读，切换组时 URL 不变、内容跟随。
 if TASK_VIDEOS_DIR.is_dir():
     app.mount("/media/task-videos", StaticFiles(directory=str(TASK_VIDEOS_DIR)), name="media-task")
+
+
+@app.get("/media/bg-images/{name:path}")
+async def media_bg_file(name: str):
+    from fastapi.responses import FileResponse
+
+    base = _idle_dir()
+    target = (base / name).resolve()
+    # 防目录穿越：必须落在当前待机组目录内
+    if not str(target).startswith(str(base.resolve())):
+        raise HTTPException(status_code=403, detail="forbidden")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="not found")
+    return FileResponse(target)
 
 
 # ── 数字人 DUIX 集成 ────────────────────────────────────────────────────────
@@ -429,6 +457,37 @@ DH_MAX_KEEP = int(DH_CFG.get("max_keep", 10))
 # 每段音频的文本上限：~48 字 ≈ 8~10s 音频（用户实测 10s 视频十几秒出片）
 DH_SEGMENT_CHARS = int(DH_CFG.get("segment_chars", 48))
 DH_MAX_TEXT = 1000
+
+# ── 人设预设（音色 + 数字人形象 组合）─────────────────────────────────────────
+# 每个预设：ref_audio/ref_text = TTS 参考音色（热切换：改 handler 属性即生效），
+# avatar = 数字人形象视频文件名（放 DH_TEMP_DIR 下，DUIX 提交时指定）。
+# 切换通过 POST /api/persona/set {name}；当前选择存 _current_persona（内存态，
+# 重启回默认；插件端可用 localStorage 记住并在启动时 set 一次）。
+PERSONAS: dict[str, dict] = {
+    "liang": {
+        "label": "梁文锋",
+        "ref_audio": CONFIG["tts"].get("ref_audio", ""),
+        "ref_text": CONFIG["tts"].get("ref_text", ""),
+        "avatar": DH_CFG.get("avatar_video", "avatar.mp4"),
+    },
+    "xiaoya-k17": {
+        "label": "小雅复制体K17",
+        "ref_audio": r"D:\speech-to-speech\backup\ref-audio\小雅台版).wav",
+        "ref_text": "靠北啦，不想聊就不聊咯，摆什么臭架子哦，真以为自己很厉害，真以为自己很好看，我也是这么觉得啦，明天继续叫你好不好，笨蛋",
+        "avatar": "avatar_新形象.mp4",
+    },
+}
+_current_persona: str = "liang"
+# 运行时形象覆盖（POST /api/persona/set {avatar} 手动指定时设置；None = 用
+# 当前音色预设绑定的形象）。这样音色与形象可独立切换。
+_avatar_override: str | None = None
+
+
+def _persona_avatar() -> str:
+    """当前数字人形象视频文件名（提交 DUIX 时用）。"""
+    if _avatar_override is not None:
+        return _avatar_override
+    return PERSONAS.get(_current_persona, PERSONAS["liang"]).get("avatar", "avatar.mp4")
 
 # 生成的成品视频保留策略：磁盘上最多保留最近 max_keep 个 <uuid>-r.mp4，
 # 超出删除最旧的（不碰 avatar.mp4 / 输入音频 / 形象底版）。
@@ -600,36 +659,45 @@ async def dh_history() -> dict:
 
 
 def _split_segments(text: str, max_len: int = 48) -> list[str]:
-    """把文本切成 <= max_len 字的段（每段 ≈8~10s 音频）。
+    """把文本按标点切成语义完整的段。
 
-    优先在句读标点后断；超长无标点的句子按 max_len 硬切，硬切点尽量落在
-    附近的断点字符（逗号/空格/冒号等）上，避免把词劈成两半。
+    规则：先按句末标点（。！？!?；;）切出完整句子，句子尽量不劈开——
+    累积句子成段，若下一句放不下（超过 max_len）就收尾本段、下句开新段；
+    只有单句本身超长（无标点）才硬切。时长是软参考，不刻意控制。
     """
     import re
 
-    parts = re.split(r"(?<=[。！？!?；;，,])", text)
+    parts = re.split(r"(?<=[。！？!?；;])", text)
+    sentences: list[str] = [p.strip() for p in parts if p.strip()]
+
     out: list[str] = []
     cur = ""
-    for part in parts:
-        if not part:
-            continue
-        while len(part) > max_len:
-            head = part[:max_len]
-            pos = max((head.rfind(c) for c in "，。！？、：；,.;: "))
-            if pos > 0:
-                cut = pos + 1
-            else:
-                cut = max_len
-            out.append(head[:cut].strip() or head[:max_len])
-            part = part[cut:] if pos > 0 else part[max_len:]
-        if cur and len(cur) + len(part) > max_len:
-            out.append(cur)
-            cur = part
-        else:
-            cur += part
-    if cur:
-        out.append(cur)
-    return [s.strip() for s in out if s.strip()]
+
+    def flush() -> None:
+        nonlocal cur
+        if cur.strip():
+            out.append(cur.strip())
+        cur = ""
+
+    for sent in sentences:
+        # 单句超长（无标点长句）：句内硬切，尽量在次级标点后切。
+        while len(sent) > max_len:
+            head = sent[:max_len]
+            pos = max((head.rfind(c) for c in "，、：；:,. "), default=-1)
+            cut = pos + 1 if pos > 0 else max_len
+            piece = head[:cut].strip()
+            if piece:
+                flush() if cur else None
+                out.append(piece)
+            sent = sent[cut:].strip()
+            if not sent:
+                break
+        # 句子完整累积：放不下就收尾本段（不拆句）。
+        if cur and len(cur) + len(sent) > max_len:
+            flush()
+        cur += sent
+    flush()
+    return out
 
 
 def _synthesize_full(handler, text: str) -> np.ndarray:
@@ -792,7 +860,7 @@ async def _dh_submit_and_wait(
     payload = {
         "code": seg_code,
         "audio_url": wav_path.name,
-        "video_url": DH_AVATAR,
+        "video_url": _persona_avatar(),
         "watermark_switch": 0,
         "digital_auth": 0,
         "chaofen": 0,
@@ -869,12 +937,169 @@ async def _dh_start_worker() -> None:
     if DH_ENABLED:
         _dh_prune_videos()  # 启动时把成品视频修剪到最近 max_keep 个
         asyncio.create_task(_dh_worker())
+        # 启动预热：合成一段短音频并提交 DUIX，让 wenet 特征提取 / init_wh /
+        # 模型加载 / TRT engine 全部走一遍热路径，首条真实回复的等待时间
+        # 显著缩短。预热任务独立于 _dh_queue 运行，结果直接丢弃。
+        asyncio.create_task(_dh_warmup())
         logger.info("DH worker started (DUIX %s, temp=%s, avatar=%s, max_keep=%d)", DH_DUIX_BASE, DH_TEMP_DIR, DH_AVATAR, DH_MAX_KEEP)
+
+
+async def _dh_warmup() -> None:
+    """后台预热：跑一次完整的「TTS → 特征 → init_wh → 生成」链路。
+
+    预热输出是「数字人没有说话」的占位短句（或仅预合成音频 + 提交），
+    完成即删，不进入播放列表、不污染 max_keep 历史。
+    """
+    try:
+        logger.info("DH warmup: synthesizing warmup audio…")
+        wav = await _dh_synth_segment("数字人系统预热完成")
+        code = f"warmup-{uuid4()}"
+        payload = {
+            "code": code,
+            "audio_url": wav.name,
+            "video_url": _persona_avatar(),
+            "watermark_switch": 0,
+            "digital_auth": 0,
+            "chaofen": 0,
+            "pn": 1,
+        }
+        async with httpx.AsyncClient(timeout=20) as client:
+            # 预热不写 _dh_state：直接提交 + 轮询，完成即删，失败静默。
+            for _ in range(60):  # 最多等 5 分钟 busy 释放
+                try:
+                    resp = await _dh_submit(client, payload)
+                except Exception:  # noqa: BLE001
+                    await asyncio.sleep(DH_SUBMIT_RETRY_SEC)
+                    continue
+                if resp.get("code") == 10000:
+                    break
+                if resp.get("code") == 10001:  # busy（真实任务在跑，跳过预热）
+                    logger.info("DH warmup: DUIX busy, skipping warmup")
+                    wav.unlink(missing_ok=True)
+                    return
+                await asyncio.sleep(DH_SUBMIT_RETRY_SEC)
+            else:
+                logger.warning("DH warmup: DUIX busy too long, skipping")
+                wav.unlink(missing_ok=True)
+                return
+            deadline = time.time() + 120
+            fname = ""
+            while time.time() < deadline:
+                await asyncio.sleep(DH_QUERY_INTERVAL)
+                q = await _dh_query(client, code)
+                if q is None:
+                    continue
+                status = str(q.get("status"))
+                if status in ("2", "success", "s", "done", "finished", "成功"):
+                    fname = str(q.get("result") or "").rsplit("/", 1)[-1]
+                    break
+            host = DH_TEMP_DIR / fname if fname else None
+            if host is not None:
+                host.unlink(missing_ok=True)
+            wav.unlink(missing_ok=True)
+            logger.info("DH warmup: done (prewarmed TTS/wenet/DUIX)%s", f" {fname} cleaned" if fname else "")
+    except Exception:  # noqa: BLE001
+        logger.exception("DH warmup failed (non-fatal)")
 
 
 # 结果视频静态挂载：插件 video 元素直接播 /media/dh/<uuid>-r.mp4（Range 支持）。
 if DH_ENABLED and DH_TEMP_DIR.is_dir():
     app.mount("/media/dh", StaticFiles(directory=str(DH_TEMP_DIR)), name="media-dh")
+
+
+# ── 人设/预设切换（音色 + 数字人形象 + 待机动画，三类独立）─────────────────
+#
+# GET  /api/persona/list  → 三类预设列表 + 当前选择
+# POST /api/persona/set   → 可选字段 {voice?, avatar?, idle?} 分别切换
+#    voice  : TTS 参考音色（热切：改 handler 属性，下一段合成即生效）
+#    avatar : 数字人形象视频文件名（后续 /api/dh/* 提交用新形象）
+#    idle   : 待机动画组名（/api/media/bg-images 与静态文件动态跟随）
+# 三类互不影响，各自独立选择；重启回默认，插件端可持久化并启动时恢复。
+
+
+class PersonaSetRequest(BaseModel):
+    voice: str | None = None
+    avatar: str | None = None
+    idle: str | None = None
+
+
+def _voice_entry(name: str) -> dict:
+    p = PERSONAS.get(name, PERSONAS["liang"])
+    return {"name": name, "label": p.get("label", name), "current": name == _current_persona}
+
+
+@app.get("/api/persona/list")
+async def persona_list() -> dict:
+    voices = [_voice_entry(n) for n in PERSONAS]
+    # 形象：扫描 temp 目录下的 avatar*.mp4（含人工放入的）
+    avatar_files = []
+    if DH_TEMP_DIR.is_dir():
+        for f in sorted(DH_TEMP_DIR.glob("avatar*.mp4")):
+            if f.name.endswith("-r.mp4") or f.name.endswith(".bak.mp4"):
+                continue  # 跳过生成产物与备份
+            avatar_files.append({
+                "name": f.name,
+                "label": f.name.replace("avatar", "").replace(".mp4", "").strip() or "默认",
+                "current": f.name == _persona_avatar(),
+            })
+    idles = [{"name": n, "label": n, "current": n == _current_idle} for n in IDLE_GROUPS]
+    return {
+        "voices": voices,
+        "avatars": avatar_files,
+        "idles": idles,
+        "current": {
+            "voice": _current_persona,
+            "avatar": _persona_avatar(),
+            "idle": _current_idle,
+        },
+    }
+
+
+@app.post("/api/persona/set")
+async def persona_set(req: PersonaSetRequest) -> dict:
+    global _current_persona, _current_idle, _avatar_override
+    result: dict = {"ok": True}
+
+    # 音色切换
+    if req.voice is not None:
+        name = req.voice.strip()
+        if name not in PERSONAS:
+            raise HTTPException(status_code=404, detail=f"Unknown voice: {name}")
+        p = PERSONAS[name]
+        try:
+            handler = await models.ensure_tts()
+            handler.ref_audio = p.get("ref_audio") or None
+            handler.ref_text = p.get("ref_text", "")
+        except HTTPException:
+            logger.warning("persona set: TTS not ready, switching voice config only")
+        _current_persona = name
+        # 切音色时，若本次未同时指定形象，则形象回到该预设绑定的默认
+        if req.avatar is None:
+            _avatar_override = None
+        result["voice"] = name
+        logger.info("voice switched to %s", name)
+
+    # 形象切换
+    if req.avatar is not None:
+        av = req.avatar.strip()
+        if not (DH_TEMP_DIR / av).is_file():
+            raise HTTPException(status_code=404, detail=f"Avatar file not found: {av}")
+        _avatar_override = av
+        result["avatar"] = av
+        logger.info("avatar switched to %s", av)
+
+    # 待机动画切换
+    if req.idle is not None:
+        name = req.idle.strip()
+        if name not in IDLE_GROUPS:
+            raise HTTPException(status_code=404, detail=f"Unknown idle group: {name}")
+        _current_idle = name
+        result["idle"] = name
+        logger.info("idle switched to %s", name)
+
+    if not result.get("voice") and not result.get("avatar") and not result.get("idle"):
+        raise HTTPException(status_code=400, detail="Nothing to set")
+    return result
 
 
 # ── DeepSeek 余额（低开销：10 分钟内存缓存，挂载/点击才查）────────────────────

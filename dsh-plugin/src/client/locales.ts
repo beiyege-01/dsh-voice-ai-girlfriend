@@ -16,6 +16,12 @@ export const zh = {
   'qqpush.offHint': '关闭 QQ 推送（回复不再发到 QQ）',
   'dh.onHint': '开启数字人（回复等数字人视频生成后 TTS+画面同步播放）',
   'dh.offHint': '关闭数字人（去掉视频生成，直接用接近即时的语音朗读回复）',
+  'balance.hint': 'DeepSeek 余额（点击刷新）',
+  'balance.errHint': '余额查询失败，点击重试',
+  'balance.loading': '余额加载中…',
+  'persona.voiceHint': '切换音色',
+  'persona.avatarHint': '切换数字人形象',
+  'persona.idleHint': '切换待机动画',
 } satisfies Record<string, string>
 
 /** The voice namespace key union. */
@@ -37,4 +43,10 @@ export const en = {
   'qqpush.offHint': 'Turn off QQ push (replies no longer sent to QQ)',
   'dh.onHint': 'Turn on digital human (reply waits for the lip-synced video, then plays TTS + video together)',
   'dh.offHint': 'Turn off digital human (no video generation, near-instant voice reading replies)',
+  'balance.hint': 'DeepSeek balance (click to refresh)',
+  'balance.errHint': 'Balance query failed, click to retry',
+  'balance.loading': 'Loading balance…',
+  'persona.voiceHint': 'Switch TTS voice',
+  'persona.avatarHint': 'Switch digital-human avatar',
+  'persona.idleHint': 'Switch idle animation',
 } satisfies Record<VoiceKey, string>
