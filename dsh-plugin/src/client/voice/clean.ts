@@ -24,7 +24,7 @@ const WHITESPACE = /\s+/g
  * @returns clean, single-line, capped text ('' when nothing remains).
  */
 export function cleanReplyText(text: string, maxChars = 400): string {
-  let out = text
+  const out = text
     .replace(FENCED_BLOCK, ' ')
     .replace(INLINE_CODE, ' ')
     .replace(URL, ' ')

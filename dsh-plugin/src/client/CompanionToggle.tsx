@@ -51,6 +51,6 @@ export const CompanionToggle = memo(function CompanionToggle({ t, companion }: C
       onClick={toggle}
     >
       <DisplayIcon />
-      </button>
+    </button>
   )
 })

@@ -27,6 +27,7 @@ assets/bg-images/*
 !assets/bg-images/bg4/
 !assets/bg-images/bg9/
 !assets/bg-images/bg56/
+!assets/bg-images/bg5/
 assets/task-videos/*
 !assets/task-videos/README.md
 assets/*.mp4
@@ -43,3 +44,4 @@ tts_out.wav
 .DS_Store
 Thumbs.db
 bridge/docker-compose-5060ti.yml.bak-cpu
+

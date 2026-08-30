@@ -10,17 +10,11 @@ import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/c
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 // Type-only: pulls ui-conversation's SlotMap merge so PropsRuntime resolves.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { MicButton } from './MicButton.tsx'
-import { BusyToggle } from './BusyToggle.tsx'
-import { QqPushToggle } from './QqPushToggle.tsx'
-import { DigitalHumanToggle } from './DigitalHumanToggle.tsx'
+import { VoiceToolbar } from './VoiceToolbar.tsx'
 import { BalanceBadge } from './BalanceBadge.tsx'
-import { BridgeStatus } from './BridgeStatus.tsx'
 import { ReplySpeakerMount } from './voice/reply-listener.tsx'
 import { QQBridge } from './voice/qq-bridge.tsx'
 import { ReplySpeaker } from './voice/speaker.ts'
-import { VoiceToggle } from './VoiceToggle.tsx'
-import { CompanionToggle } from './CompanionToggle.tsx'
 import { CompanionWindow } from './voice/companion.tsx'
 import { CompanionController } from './voice/companion-controller.ts'
 import { bridgeBase } from './bridge.ts'
@@ -122,91 +116,18 @@ export function apply(ctx: ClientContext): void {
     },
   })
 
-  ctx.slots.inject('conversation.input.left', () => ctx.slots.register(
+  // ── composer tool controls live ABOVE the input card (conversation.input.dock):
+  //    one compact row (mic / toggles / bridge-status), so the card's own tool
+  //    row stays short and the model select keeps its place on the same line.
+  ctx.slots.inject('conversation.input.dock', () => ctx.slots.register(
     {
-      name: 'conversation.input.left',
-      id: 'voice-mic',
-      order: 80,
+      name: 'conversation.input.dock',
+      id: 'voice-toolbar',
+      order: 0,
       locale: NS,
       inject: injectFace,
     },
-    MicButton,
-  ))
-
-  // Bridge-down warning (order 83): shows a ⚠ button when the voice bridge is
-  // unreachable — the plugin alone is a hollow UI without the main repo.
-  ctx.slots.inject('conversation.input.left', () => ctx.slots.register(
-    {
-      name: 'conversation.input.left',
-      id: 'voice-bridge-status',
-      order: 83,
-      locale: NS,
-      inject: injectFace,
-    },
-    BridgeStatus,
-  ))
-
-  // Reply-reading toggle (s2s.voice.enabled; mic input stays independent).
-  // Turning it OFF interrupts any reply currently being read aloud.
-  ctx.slots.inject('conversation.input.left', () => ctx.slots.register(
-    {
-      name: 'conversation.input.left',
-      id: 'voice-toggle',
-      order: 85,
-      locale: NS,
-      inject: injectFace,
-    },
-    VoiceToggle,
-  ))
-
-  // Companion-window visibility toggle (s2s.voice.companion).
-  ctx.slots.inject('conversation.input.left', () => ctx.slots.register(
-    {
-      name: 'conversation.input.left',
-      id: 'voice-companion-toggle',
-      order: 86,
-      locale: NS,
-      inject: injectFace,
-    },
-    CompanionToggle,
-  ))
-
-  // QQ reply-push toggle (s2s.voice.qqPush): ON = replies auto-pushed to QQ.
-  ctx.slots.inject('conversation.input.left', () => ctx.slots.register(
-    {
-      name: 'conversation.input.left',
-      id: 'voice-qqpush-toggle',
-      order: 84,
-      locale: NS,
-      inject: injectFace,
-    },
-    QqPushToggle,
-  ))
-
-  // Busy-delivery toggle (s2s.voice.interrupt): steer the running turn
-  // (interrupt, default) or queue behind it (continuous conversation).
-  ctx.slots.inject('conversation.input.left', () => ctx.slots.register(
-    {
-      name: 'conversation.input.left',
-      id: 'voice-busy-toggle',
-      order: 87,
-      locale: NS,
-      inject: injectFace,
-    },
-    BusyToggle,
-  ))
-
-  // Digital-human toggle (s2s.voice.digitalHuman): ON = replies wait for the
-  // lip-synced video (TTS+video together); OFF = near-instant sentence TTS.
-  ctx.slots.inject('conversation.input.left', () => ctx.slots.register(
-    {
-      name: 'conversation.input.left',
-      id: 'voice-dh-toggle',
-      order: 88,
-      locale: NS,
-      inject: injectFace,
-    },
-    DigitalHumanToggle,
+    VoiceToolbar,
   ))
 
   // DeepSeek balance chip lives in the bottom status dock (next to the

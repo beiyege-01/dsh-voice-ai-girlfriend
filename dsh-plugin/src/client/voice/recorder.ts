@@ -199,7 +199,7 @@ export class MicRecorder {
     this.opts.vad?.close()
     this.node?.port.close()
     this.source?.disconnect()
-    this.stream?.getTracks().forEach((track) => track.stop())
+    this.stream?.getTracks().forEach(track => track.stop())
     void this.ctx?.close().catch(() => {})
     this.node = null
     this.source = null

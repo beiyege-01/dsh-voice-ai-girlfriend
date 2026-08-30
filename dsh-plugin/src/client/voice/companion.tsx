@@ -45,6 +45,70 @@ function readSide(): 'left' | 'right' {
   }
 }
 
+/** The right-fixed sidebar's panel element (better-sidebar & alike), excluding the bottom panel. */
+const SIDEBAR_PANEL_SEL = '[data-dsh-panel]:not([data-dsh-bottom-panel])'
+
+/**
+ * 右侧固定插件（dsh-better-sidebar 等）展开时占用的右侧宽度（px）。
+ *
+ * 数字人窗口据此贴到插件的左缘，而不是被它遮挡：
+ *  - 未装插件 / 面板不存在        → 0（贴视口右缘，原逻辑）
+ *  - 插件折叠（body 挂 data-dsh-sidebar-collapsed）→ 0
+ *  - 面板展开（贴视口右缘）       → 视口宽 - 面板 left（即占位宽度）
+ *  - 折叠/展开动画中面板滑出视口  → 0
+ *
+ * 用 MutationObserver（body 折叠标记/拖拽）+ ResizeObserver（面板尺寸）+ 轮询
+ * 兜底（插件可能在数字人挂载后才懒加载），保证三种时序都收敛。
+ */
+function useSidebarInset(): number {
+  const [inset, setInset] = useState(0)
+  useEffect(() => {
+    const measure = () => {
+      if (document.body.hasAttribute('data-dsh-sidebar-collapsed')) {
+        setInset(0)
+        return
+      }
+      const panel = document.querySelector<HTMLElement>(SIDEBAR_PANEL_SEL)
+      if (!panel) {
+        setInset(0)
+        return
+      }
+      const rect = panel.getBoundingClientRect()
+      const w = window.innerWidth
+      // 展开时面板贴右缘（rect.right ≈ w），占位 = w - rect.left；
+      // 动画中 rect.left 越过视口（>= w）→ 计 0。
+      if (rect.left > 0 && rect.left < w && rect.right >= w - 1) {
+        setInset(Math.round(w - rect.left))
+      } else {
+        setInset(0)
+      }
+    }
+    measure()
+    const mo = new MutationObserver(measure)
+    mo.observe(document.body, { attributes: true, attributeFilter: ['data-dsh-sidebar-collapsed', 'data-dsh-sidebar-dragging'] })
+    let ro: ResizeObserver | null = null
+    const bind = () => {
+      ro?.disconnect()
+      const panel = document.querySelector<HTMLElement>(SIDEBAR_PANEL_SEL)
+      if (panel) {
+        ro = new ResizeObserver(measure)
+        ro.observe(panel)
+      }
+    }
+    bind()
+    // 插件可能晚于数字人挂载（懒加载 chunk）→ 轮询补绑观察
+    const iv = window.setInterval(() => {
+      if (document.querySelector(SIDEBAR_PANEL_SEL) && ro === null) bind()
+    }, 2000)
+    return () => {
+      mo.disconnect()
+      ro?.disconnect()
+      window.clearInterval(iv)
+    }
+  }, [])
+  return inset
+}
+
 /** Full props: framework runtime share + `voice` locale seat + injected face. */
 export type CompanionWindowProps =
   PropsRuntime<'conversation.input.left'> & PropsLocale<'voice'> & VoiceInjected
@@ -385,12 +449,17 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
   }, [])
 
   const dhBusy = dh !== null && (dh.state === 'tts' || dh.state === 'generating')
+
+  // 右侧固定插件（better-sidebar 等）展开时，贴到它的左缘而不是被遮挡。
+  // Hook 必须无条件调用（React 规则），放在条件 return 之前。
+  const sidebarInset = useSidebarInset()
+
   if (!visible || (bgVideos.length === 0 && taskVideos.length === 0 && !dhPlaying && !dhBusy)) return null
 
   return (
     <div
       className={side === 'right' ? css.companion : `${css.companion} ${css.left}`}
-      style={{ width: `${widthVw}vw`, right: side === 'right' ? 0 : undefined, left: side === 'left' ? 0 : undefined }}
+      style={{ width: `${widthVw}vw`, right: side === 'right' ? sidebarInset : undefined, left: side === 'left' ? 0 : undefined }}
       aria-hidden="true"
     >
       {bgVideos.length > 0 && (

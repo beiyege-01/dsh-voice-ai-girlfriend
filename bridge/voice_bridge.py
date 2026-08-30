@@ -48,7 +48,8 @@ logger = logging.getLogger("voice_bridge")
 
 
 def load_config() -> dict:
-    with open(CONFIG_PATH, encoding="utf-8") as f:
+    # utf-8-sig 容忍 BOM（某些工具如 PowerShell 5.1 Set-Content 会写 BOM）
+    with open(CONFIG_PATH, encoding="utf-8-sig") as f:
         return json.load(f)
 
 
@@ -313,7 +314,10 @@ async def tts(req: TTSRequest, request: Request) -> Response:
     watcher = asyncio.create_task(watch_disconnect())
     try:
         async with models.infer_lock:
-            handler = await models.ensure_tts()
+            if PERSONAS.get(_current_persona, {}).get("engine", "qwen3") == "qwen3":
+                handler = await models.ensure_tts()
+            else:
+                handler = None  # OmniVoice 引擎不需要 Qwen3 handler
             samples = await asyncio.to_thread(_synthesize, handler, text, cancel)
     finally:
         watcher.cancel()
@@ -327,10 +331,18 @@ async def tts(req: TTSRequest, request: Request) -> Response:
 
 
 def _synthesize(handler, text: str, cancel: threading.Event | None = None) -> np.ndarray:
-    """Run the Qwen3 TTS handler for one utterance, concatenating int16 chunks.
+    """Run TTS for one utterance, concatenating int16 chunks.
 
-    Stops early between chunks when `cancel` is set (client disconnect)."""
+    Stops early between chunks when `cancel` is set (client disconnect).
+    当前音色是 OmniVoice（design/clone）时改走 OmniVoice 引擎；
+    其余走 Qwen3 handler（参考音色克隆）。
+    """
     from speech_to_speech.pipeline.messages import TTSInput
+
+    persona = PERSONAS.get(_current_persona, {})
+    if persona.get("engine", "qwen3") != "qwen3":
+        # OmniVoice 无法中途取消：合成为原子调用，完成后由调用方检查 cancel
+        return _synthesize_omnivoice(text, persona)
 
     chunks = []
     for chunk in handler.process(TTSInput(text=text, language_code="zh")):
@@ -356,6 +368,103 @@ def _pcm16_to_wav(samples: np.ndarray) -> bytes:
         w.setframerate(16000)
         w.writeframes(samples.astype("<i2").tobytes())
     return buf.getvalue()
+
+
+# ── OmniVoice TTS 引擎（小米 k2-fsa/OmniVoice，第二 TTS 后端）────────────────
+# 服务启动：omnivoice-demo --model <dir> --port 9877 --no-asr --ip <LAN IP>
+# （Gradio app，绑定局域网 IP；本机访问须用该 IP，127.0.0.1 连不上）。
+# 调用方式：gradio_client 官方库（直接 HTTP 缺 session_hash 易 500）。
+# 两种模式（对应 voices 下的音色子文件夹）：
+#   omni-design —— design.json 参数设计音色（gender/age/pitch/style/accent/dialect）
+#   omni-clone  —— ref_audio + ref_text + omnivoice.txt 标记，克隆参考音频
+# 输出统一重采样为 16kHz 单声道 int16，与 Qwen3 路径一致。
+# 注意：gradio_client 非线程安全 → 专用锁串行（infer_lock 之外的保险）。
+OMNI_CFG = CONFIG.get("omnivoice", {})
+OMNI_BASE = str(OMNI_CFG.get("base", "")).rstrip("/")
+OMNI_LANG = OMNI_CFG.get("lang", "Chinese")
+OMNI_TIMEOUT = float(OMNI_CFG.get("timeout_sec", 120))
+
+_omni_lock = threading.Lock()
+_omni_client = None  # 惰性单例 gradio Client
+
+
+def _omni_get_client():
+    """惰性创建 gradio Client（首次调用会拉取服务配置，~秒级）。"""
+    global _omni_client
+    if _omni_client is None:
+        from gradio_client import Client
+        _omni_client = Client(OMNI_BASE, verbose=False)
+    return _omni_client
+
+
+def _omni_default(param: str, fallback):
+    return OMNI_CFG.get(param, fallback)
+
+
+def _load_wav_16k(path: str) -> np.ndarray:
+    """读 wav（任意采样率）→ 16kHz 单声道 int16 samples。"""
+    import soundfile as sf
+    from scipy.signal import resample_poly
+
+    data, sr = sf.read(path, dtype="float32", always_2d=False)
+    if data.ndim > 1:
+        data = data.mean(axis=1)
+    if sr != 16000:
+        import math
+        g = math.gcd(int(sr), 16000)
+        data = resample_poly(data, 16000 // g, int(sr) // g)
+    return (np.clip(data, -1.0, 1.0) * 32767).astype(np.int16)
+
+
+def _synthesize_omnivoice(text: str, persona: dict) -> np.ndarray:
+    """用 OmniVoice 合成一段文本，返回 16kHz int16 samples。
+
+    persona: PERSONAS[name]（engine=omni-design / omni-clone）。
+    服务不可达时抛 RuntimeError，由调用方决定如何收尾。
+    """
+    if not OMNI_BASE:
+        raise RuntimeError("OmniVoice 未配置：bridge-config.json 缺 omnivoice.base")
+    engine = persona.get("engine", "omni-design")
+    params = persona.get("params", {})
+    lang = params.get("lang", OMNI_LANG)
+    ns = int(params.get("ns", _omni_default("ns", 32)))
+    gs = float(params.get("gs", _omni_default("gs", 2.0)))
+    dn = bool(params.get("dn", _omni_default("dn", True)))
+    sp = float(params.get("sp", _omni_default("sp", 1.0)))
+    pp = bool(params.get("pp", _omni_default("pp", True)))
+    po = bool(params.get("po", _omni_default("po", True)))
+    du = params.get("du")  # 可选秒数，None=自动
+
+    with _omni_lock:
+        client = _omni_get_client()
+        try:
+            if engine == "omni-design":
+                result = client.predict(
+                    text, lang, ns, gs, dn, sp, du, pp, po,
+                    params.get("gender", "Auto"),
+                    params.get("age", "Auto"),
+                    params.get("pitch", "Auto"),
+                    params.get("style", "Auto"),
+                    params.get("accent", "Auto"),
+                    params.get("dialect", "Auto"),
+                    api_name="/_design_fn",
+                )
+            else:  # omni-clone
+                from gradio_client import handle_file
+                result = client.predict(
+                    text, lang,
+                    handle_file(persona.get("ref_audio", "")),
+                    persona.get("ref_text", ""),
+                    "",  # instruct
+                    ns, gs, dn, sp, du, pp, po,
+                    api_name="/_clone_fn",
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("OmniVoice %s failed for %r", engine, text[:40])
+            raise RuntimeError(f"OmniVoice 合成失败: {type(exc).__name__}: {exc}") from exc
+    wav_path, status = result[0], result[1]
+    logger.info("OmniVoice %s OK: status=%r chars=%d", engine, status, len(text))
+    return _load_wav_16k(wav_path)
 
 
 # ── Companion media hosting (T8) ────────────────────────────────────────────
@@ -398,6 +507,14 @@ def _list_media(directory: Path) -> list[dict]:
         elif ext in IMAGE_EXTS:
             entries.append({"name": name, "type": "image"})
     return entries
+
+
+# 默认待机动画组：优先 bridge-config persona.default_idle（组存在时），
+# 否则回退 "default"（bg-images 根目录）。须在 _idle_groups/_list_media
+# 定义之后解析（模块级顺序）。
+_PERSONA_CFG = CONFIG.get("persona", {})
+_default_idle_cfg = str(_PERSONA_CFG.get("default_idle", "") or "")
+_current_idle: str = _default_idle_cfg if _default_idle_cfg in _idle_groups() else "default"
 
 
 @app.get("/api/media/bg-images")
@@ -468,9 +585,13 @@ DH_SEGMENT_CHARS = int(DH_CFG.get("segment_chars", 48))
 DH_MAX_TEXT = 1000
 
 # ── TTS 音色预设（统一从 voices 大文件夹下子文件夹读取）────────────────────
-# 约定：VOICES_DIR（voices）下的每个【子文件夹】= 一个音色，文件夹名即音色名；
-# 子文件夹内放 ref_audio.wav（参考音频）+ ref_text.txt（对应文本，UTF-8）。
-# 新增音色：在 voices 下新建子文件夹放这两个文件即可，启动时自动扫描。
+# 约定：VOICES_DIR（voices）下的每个【子文件夹】= 一个音色，文件夹名即音色名。
+# 三种音色类型（按文件夹内容自动识别，engine 字段区分）：
+#   1. qwen3 克隆音色（默认）：ref_audio.wav + ref_text.txt —— Qwen3-TTS 克隆
+#   2. omni-design 音色：design.json（无需音频）—— OmniVoice 参数设计音色
+#   3. omni-clone 音色：ref_audio + ref_text.txt + omnivoice.txt（空标记）——
+#      OmniVoice 引擎克隆参考音频（比 Qwen3 克隆更保真）
+# 新增音色：在 voices 下新建子文件夹放对应文件即可，启动时自动扫描。
 VOICES_DIR = Path("D:/speech-to-speech/voices")
 AUDIO_EXTS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac"}
 TEXT_EXTS = {".txt", ".text"}
@@ -484,21 +605,59 @@ def _scan_voices() -> dict[str, dict]:
                 continue
             name = entry.name
             audio = next((f for f in entry.iterdir() if f.suffix.lower() in AUDIO_EXTS), None)
-            text = next((f for f in entry.iterdir() if f.suffix.lower() in TEXT_EXTS), None)
-            if audio is None:
-                continue  # 无参考音频的子文件夹跳过
-            ref_text = text.read_text(encoding="utf-8", errors="ignore").strip() if text is not None else ""
-            voices[name] = {
-                "label": name,
-                "ref_audio": str(audio),
-                "ref_text": ref_text,
-            }
+            # 参考文本只认 ref_text.txt/.text —— 不能匹配所有 .txt，否则可能
+            # 抓到 omnivoice.txt（OmniVoice 克隆标记）当参考文本（iterdir 无序）。
+            text = next((f for f in entry.iterdir() if f.name.lower() in ("ref_text.txt", "ref_text.text")), None)
+            design_file = entry / "design.json"
+            omni_marker = entry / "omnivoice.txt"
+            if design_file.is_file():
+                # OmniVoice 设计音色：无需参考音频，参数从 design.json 读
+                try:
+                    params = json.loads(design_file.read_text(encoding="utf-8"))
+                except Exception:  # noqa: BLE001
+                    logger.exception("voice %s: bad design.json, skipped", name)
+                    continue
+                voices[name] = {
+                    "label": str(params.pop("label", name)),
+                    "engine": "omni-design",
+                    "params": params,
+                }
+            elif audio is not None and omni_marker.is_file():
+                # OmniVoice 克隆音色：用 OmniVoice 引擎克隆参考音频
+                ref_text = text.read_text(encoding="utf-8", errors="ignore").strip() if text is not None else ""
+                voices[name] = {
+                    "label": name,
+                    "engine": "omni-clone",
+                    "ref_audio": str(audio),
+                    "ref_text": ref_text,
+                }
+            elif audio is not None:
+                # Qwen3 克隆音色（默认引擎）
+                ref_text = text.read_text(encoding="utf-8", errors="ignore").strip() if text is not None else ""
+                voices[name] = {
+                    "label": name,
+                    "engine": "qwen3",
+                    "ref_audio": str(audio),
+                    "ref_text": ref_text,
+                }
     return voices
 
 
 PERSONAS: dict[str, dict] = _scan_voices()
-# 默认音色：用户当前在用的（可改；不存在时回退到扫描到的第一个音色）。
-_default_voice = "xiaoya-hunan" if "xiaoya-hunan" in PERSONAS else next(iter(PERSONAS), "")
+# 默认音色：优先 bridge-config persona.default_voice（存在时），其次
+# OmniVoice 引擎音色（engine != qwen3，保证启动不加载 Qwen3-TTS 省显存），
+# 最后回退 Qwen3 系。
+_default_cfg = str(_PERSONA_CFG.get("default_voice", "") or "")
+if _default_cfg in PERSONAS:
+    _default_voice = _default_cfg
+else:
+    _omni_voices = [n for n, p in PERSONAS.items() if p.get("engine", "qwen3") != "qwen3"]
+    if _omni_voices:
+        _default_voice = _omni_voices[0]
+    elif "xiaoya-hunan" in PERSONAS:
+        _default_voice = "xiaoya-hunan"
+    else:
+        _default_voice = next(iter(PERSONAS), "")
 _current_persona: str = _default_voice
 # 运行时形象覆盖（POST /api/persona/set {avatar} 手动指定时设置；None = 默认
 # 用配置 avatar_video 或 temp 下第一个可用形象）。音色与形象完全独立切换。
@@ -757,6 +916,14 @@ def _synthesize_full(handler, text: str) -> np.ndarray:
     """整段回复 TTS：超长文本分块合成后拼接为一条连续 int16 音频。"""
     from speech_to_speech.pipeline.messages import TTSInput
 
+    persona = PERSONAS.get(_current_persona, {})
+    if persona.get("engine", "qwen3") != "qwen3":
+        # OmniVoice：同样分块（每块一次合成调用），再拼接
+        chunks = [_synthesize_omnivoice(part, persona) for part in _split_segments(text, 400)]
+        if not chunks:
+            raise RuntimeError("DH TTS produced no audio")
+        return np.concatenate(chunks)
+
     chunks: list[np.ndarray] = []
     for part in _split_segments(text, 400):
         for chunk in handler.process(TTSInput(text=part, language_code="zh")):
@@ -888,7 +1055,10 @@ async def _dh_run(item: dict) -> None:
 async def _dh_synth_segment(seg_text: str) -> Path:
     """合成一小段音频到 temp 目录，返回宿主路径。"""
     async with models.infer_lock:
-        handler = await models.ensure_tts()
+        if PERSONAS.get(_current_persona, {}).get("engine", "qwen3") == "qwen3":
+            handler = await models.ensure_tts()
+        else:
+            handler = None  # OmniVoice 引擎不需要 Qwen3 handler
         samples = await asyncio.to_thread(_synthesize_full, handler, seg_text)
     ts = datetime.now().strftime("%Y%m%d%H%M%S%f")[:-3]
     wav_path = DH_TEMP_DIR / f"{ts}.wav"
@@ -1130,12 +1300,15 @@ async def persona_set(req: PersonaSetRequest) -> dict:
         if name not in PERSONAS:
             raise HTTPException(status_code=404, detail=f"Unknown voice: {name}")
         p = PERSONAS[name]
-        try:
-            handler = await models.ensure_tts()
-            handler.ref_audio = p.get("ref_audio") or None
-            handler.ref_text = p.get("ref_text", "")
-        except HTTPException:
-            logger.warning("persona set: TTS not ready, switching voice config only")
+        if p.get("engine", "qwen3") == "qwen3":
+            # 只有 Qwen3 音色需要热切 handler.ref_audio/ref_text；OmniVoice
+            # 音色走独立引擎，不加载 Qwen3（否则首次切换会卡几十秒加载）。
+            try:
+                handler = await models.ensure_tts()
+                handler.ref_audio = p.get("ref_audio") or None
+                handler.ref_text = p.get("ref_text", "")
+            except HTTPException:
+                logger.warning("persona set: TTS not ready, switching voice config only")
         _current_persona = name
         # 音色与形象完全独立：切音色不影响当前形象选择。
         result["voice"] = name
@@ -1275,7 +1448,10 @@ async def qq_send(req: QQSendRequest) -> dict:
             text = (req.text or "").strip()[:512]
             cancel = threading.Event()
             async with models.infer_lock:
-                handler = await models.ensure_tts()
+                if PERSONAS.get(_current_persona, {}).get("engine", "qwen3") == "qwen3":
+                    handler = await models.ensure_tts()
+                else:
+                    handler = None  # OmniVoice 引擎不需要 Qwen3 handler
                 samples = await asyncio.to_thread(_synthesize, handler, text, cancel)
             result = send_voice(base, token, user_id, samples.astype("<i2").tobytes())
         else:

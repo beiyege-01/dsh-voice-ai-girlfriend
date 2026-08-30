@@ -102,7 +102,7 @@ export function dhDiscard(code: string | null | undefined): void {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ code }),
-  }).catch((err) => console.error('[ui-voice] digital human discard failed:', err))
+  }).catch(err => console.error('[ui-voice] digital human discard failed:', err))
 }
 
 /** Poll the digital-human task state (companion window playback driver). */

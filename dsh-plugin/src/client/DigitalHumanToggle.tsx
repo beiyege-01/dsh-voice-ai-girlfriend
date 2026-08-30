@@ -69,6 +69,6 @@ export const DigitalHumanToggle = memo(function DigitalHumanToggle({ t }: Digita
       onClick={toggle}
     >
       <DigitalHumanIcon />
-      </button>
+    </button>
   )
 })
