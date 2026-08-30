@@ -23,8 +23,12 @@ if not exist "%BRIDGE_PY%" (
     exit /b 1
 )
 
-rem --- start the voice bridge in its own minimized window ---
+rem --- start the voice bridge in its own minimized window (skip if already up) ---
 cd /d "%REPO_ROOT%\bridge"
+>nul 2>&1 curl -s -m 2 "http://127.0.0.1:8765/api/health" && (
+    echo [OK] voice bridge already running at :8765 (skipping duplicate start)
+    goto :bridge_ok
+)
 if not exist "%REPO_ROOT%\models\silero-vad\silero_vad_v4.jit" (
     echo [WARN] silero-vad model missing: %REPO_ROOT%\models\silero-vad\silero_vad_v4.jit
 )
