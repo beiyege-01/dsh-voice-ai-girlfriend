@@ -14,7 +14,7 @@
 - 👧 **会动**：右侧数字人窗口，空闲时发呆、说话时开口 —— 一个会呼吸的 AI，不是冷冰冰的对话框
 - 🎬 **会演**：回复不只是声音——**流式数字人**（DUIX）把你的回复实时生成口播视频：长回复切成 ≤10 秒小段，边生成画面边合成下一段语音，一段接一段连续播放，TTS 与口型同步开口
 - 🔇 **懂打断**：你插嘴她就闭嘴听你说；想让她把话说完，点一下开关就切回排队模式
-- 🔊 **声音是你的**：TTS 声音克隆，音色由你给的参考音频决定——她可以长成你喜欢的样子
+- 🔊 **声音是你的**：TTS 声音克隆（OmniVoice，600+ 语言），音色由你给的参考音频决定，或直接用参数设计音色——她可以长成你喜欢的样子
 - 🎛️ **随你调配**：数字人开关（开=视频+声音同步 / 关=接近即时的纯语音朗读）、QQ 推送开关、女友窗开关、插话/排队模式，全部工具行一键切换
 
 ```
@@ -31,7 +31,7 @@
 ┌─────▼──────────────────────▼──────────────┐
 │  voice_bridge (:8765)                      │
 │  /api/stt  FunASR 中文 ASR                 │
-│  /api/tts  Qwen3-TTS 声音克隆               │
+│  /api/tts  OmniVoice 克隆（WSL2·FlashInfer 加速）│
 │  /api/dh/* DUIX 数字人（分段流水线/播放/开关）│
 │  /api/qq/* QQ 桥（收发 + 语音推送）          │
 │  /api/vad  silero 打断 / media 素材         │
@@ -55,8 +55,8 @@ dsh-voice-ai-girlfriend/
 │   ├── start-bridge.cmd           # 只起桥接
 │   └── start-all.cmd              # 桥接 + DSH Web 一键启动
 ├── models/            # 模型（gitignore，不入库）：funasr/ + silero-vad/
-├── assets/            # 素材：内置 4 套默认待机动画（bg2/bg4/bg9/bg56），可直接用；也可自备
-│   ├── bg-images/     # 空闲动画：内置 bg2/bg4/bg9/bg56 四套，自建子文件夹即可添加自定义待机
+├── assets/            # 素材：内置 5 套默认待机动画（bg2/bg4/bg9/bg56/bg5），可直接用；也可自备
+│   ├── bg-images/     # 空闲动画：内置 bg2/bg4/bg9/bg56/bg5 五套，自建子文件夹即可添加自定义待机
 │   └── task-videos/   # 备用说话动画（可选；开了数字人后自动用 DUIX 视频）
 ├── voices/            # 音色库（自建）：每个子文件夹 = 一个 TTS 音色（见「自定义音色」）
 ├── dsh-plugin/        # DSH 客户端插件源码（mic/开关/女友窗/数字人/流式朗读）
@@ -84,16 +84,16 @@ dsh-voice-ai-girlfriend/
 
 > `nvidia-smi` 不是 NVIDIA 显卡也能显示吗？不能——如果没有 NVIDIA 显卡或驱动没装好，会提示"不是内部或外部命令"或报错。**没有 NVIDIA 显卡就装不了本项目**（模型推理依赖 CUDA GPU）。
 
-**显存占用**（运行时实测，约 8GB）：
+**显存占用**（运行时实测）：
 
-| 模型 | 显存占用 |
+| 模式 | 显存占用 |
 |---|---|
-| Qwen3-TTS 1.7B（fp16） | ~3.7GB |
+| **推荐：OmniVoice TTS（WSL2 + FlashInfer）** | ~5.3GB（空闲）~ 11GB（推理峰值，CUDA graph 分桶缓存） |
+| Qwen3-TTS 1.7B（fp16，备选降级） | ~3.7GB |
 | FunASR Paraformer-large（fp16） | ~1GB |
-| CUDA 上下文 / 激活 / 缓冲 | ~3GB 余量 |
-| **合计** | **~8.1GB（实测 `nvidia-smi` 8101 MiB）** |
+| DUIX 数字人（视频生成时） | ~4-6GB |
 
-> 所以 16GB 显存可流畅运行（含浏览器、系统开销余量）；8GB 显存的卡会非常紧张，不推荐。
+> 全链路（TTS + 数字人同时工作）实测峰值约 **15GB**，16GB 显存基本吃满；OmniVoice 与 DUIX 建议错峰（TTS 合成完再生成视频）。16GB 显存为推荐配置，8GB 会非常紧张不推荐。
 
 ### 2. 安装 Git
 
@@ -148,7 +148,7 @@ pnpm install
 | 本项目代码 + 素材 | ~8MB |
 | Python 虚拟环境 + 依赖（含 PyTorch） | ~5-8GB |
 | FunASR Paraformer 模型（models/funasr/） | ~850MB |
-| Qwen3-TTS 模型 | ~2GB |
+| OmniVoice TTS 环境（WSL2 内，含模型 + torch cu130 + FlashInfer） | ~10GB（WSL2 磁盘） |
 | deepseek-harness + node_modules | ~2-4GB |
 
 ## 二、安装本项目
@@ -203,20 +203,34 @@ xcopy /E /I %USERPROFILE%\.cache\modelscope\models\iic--speech_paraformer-large_
 
 > 想换回 whisper（如 `openai/whisper-large-v3` 或 `-turbo`）？把 `bridge-config.json` 里 `stt.backend` 改为 `"whisper"` 并把 `model_name` 换成 whisper 模型 id 即可（桥接双后端都支持）。
 
-### 2. TTS 模型：Qwen3-TTS-12Hz-1.7B-Base（声音克隆模型，手动准备）
+### 2. TTS 引擎：OmniVoice（推荐，跑在 WSL2，FlashInfer 加速）
 
-⚠️ **必须用 Base 版本**：`Qwen/Qwen3-TTS-12Hz-1.7B-Base` 才支持"映射克隆"（用参考音频克隆音色）。网上流传的 **VoiceDesign 版本不支持克隆**，别下错了。
+项目默认 TTS 已从 Qwen3-TTS 换成 **OmniVoice**（小米 k2-fsa/OmniVoice，600+ 语言、克隆/设计双模式），并跑在 **WSL2** 里配合 **FlashInfer**（CUDA Graph 加速，Blackwell 专属）使用。实测收益：
 
-**推荐用 ModelScope 下载**（国内快，先装 modelscope）：
+| 指标 | 旧（Qwen3-TTS） | 新（OmniVoice + FlashInfer） |
+|---|---|---|
+| 克隆首轮出音 | 18.3s | **1.6s** |
+| 热态出音 | ~2.2s | **~1.3s** |
+| 空闲显存 | 7GB（常驻） | **5.3GB** |
+| 音色数量 | 参考音频克隆 | 克隆 + 参数设计（性别/年龄/音调/方言） |
+
+**部署前提**：Windows 11 + WSL2（Ubuntu 22.04）。WSL2 内用 uv 建环境：torch 2.13.0+cu130 + flashinfer 0.6.18 + jit-cache cu130 + nvcc cu13（Blackwell sm_120 必须 cu13 系列，cu129 会报「requires GPUs with sm75」）。**注意**：WSL2 系统里若有旧 nvcc（如 12.8）会干扰 flashinfer 的 CUDA 版本检测，启动服务前必须设置 `CUDA_HOME` 指向 cu13 的 nvcc 目录。
+
+**启动 OmniVoice 服务**（WSL2 内）：
+
+```bash
+# 一键（含 CUDA_HOME 配置，模型复用 Windows 挂载 /mnt/e 的路径）
+wsl -d Ubuntu-22.04 -- bash ~/omnivoice-wsl/start_server.sh
+```
+
+服务监听 `0.0.0.0:9877`，Windows 侧通过 **WSL2 的 IP**（`wsl hostname -I` 查询，重启后可能变化）访问，bridge-config 的 `omnivoice.base` 指向 `http://<WSL2-IP>:9877`。Windows 的 localhost 转发在本机 WSL2 网络模式下失效，必须用 IP。
+
+**备选：Qwen3-TTS（无需 WSL2，降级方案）**：若不使用 WSL2，可在 `bridge-config.json` 里把 `tts` 相关配置切回 Qwen3-TTS-12Hz-1.7B-**Base**（仅 Base 支持参考音频克隆，VoiceDesign 不支持）。模型用 ModelScope 下载：
 
 ```powershell
 pip install modelscope
 modelscope download --model Qwen/Qwen3-TTS-12Hz-1.7B-Base --local_dir ./Qwen3-TTS-12Hz-1.7B-Base
 ```
-
-> 在**项目根目录**执行上面命令，模型会下载到 `项目根\Qwen3-TTS-12Hz-1.7B-Base\`。
-
-**文件夹叫什么名字无所谓**（叫 Base、VoiceDesign、或任何名字都行），只要里面装的是 Base 的权重文件即可——配置文件认的是**目录路径**，不认名字。
 
 ## 四、准备参考音频（决定音色）
 
@@ -254,9 +268,11 @@ copy bridge\bridge-config.example.json bridge\bridge-config.json
 
 | 位置 | 改成什么 |
 |---|---|
-| `tts.model_name` | 你 TTS 模型的**真实目录路径**（第三部分的模型文件夹） |
+| `omnivoice.base` | OmniVoice 服务地址（WSL2 IP，如 `http://192.168.1.244:9877`） |
+| `persona.default_voice` | 默认音色名（见 voices/ 下的文件夹名） |
+| `tts.ref_text`（备选 Qwen3 时） | 参考音频实际朗读的文本（见第四部分） |
 
-路径格式两种都行（Windows 下推荐正斜杠）：
+> OmniVoice 模式下 `tts.*` 的模型路径不再使用（引擎跑在 WSL2 服务里）；只有切回备选 Qwen3-TTS 时才需要填 `tts.model_name`：
 
 ```
 "C:/你的QwenTTS模型目录/Qwen3-TTS-12Hz-1.7B-Base"     ← 正斜杠
@@ -451,13 +467,13 @@ WebUI → 网络配置：
 
 9. **数字人视频生成了但没播** → 刷新 DSH 页面（插件逻辑更新后需刷新加载）；确认女友窗可见。生成中窗口底部会显示「数字人生成中 i/n…」，一段播完自动续接下一段。
 
-10. **声音不像参考音频** → 检查 `ref_audio.wav` 是否清晰无杂音、`tts.ref_text` 是否与录音**逐字一致**（标点也要对）；并确认 TTS 模型是 **Base 版本**（`Qwen/Qwen3-TTS-12Hz-1.7B-Base`），VoiceDesign 版本不支持克隆。
+10. **声音不像参考音频** → 检查 `ref_audio.wav` 是否清晰无杂音、参考文本（`voices/<音色名>/ref_text.txt`）是否与录音**逐字一致**（标点也要对）；参考音频建议 3-10 秒单一完整句，不要跨句截取（跨句会导致输出混入参考内容）。OmniVoice 服务未启动时检查 `~/omnivoice-wsl/server.log` 是否有报错。
 
 ---
 
 ## 自定义素材（音色 / 待机动画 / 数字人形象）
 
-项目自带 **4 套默认待机动画**（`assets/bg-images/bg2|bg4|bg9|bg56`），开箱即用。以下说明如何添加自己的素材——三类互不影响，随时可在工具行切换：
+项目自带 **5 套默认待机动画**（`assets/bg-images/bg2|bg4|bg9|bg56|bg5`），开箱即用。以下说明如何添加自己的素材——三类互不影响，随时可在工具行切换：
 
 **🎙️ 自定义音色**（`voices/` 子文件夹，可多个并存）
 1. 在 `voices/` 下新建子文件夹，文件夹名即音色名（如 `voices/我的声音/`）

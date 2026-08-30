@@ -1,7 +1,10 @@
 {
   "host": "127.0.0.1",
   "port": 8765,
-  "cors_origins": ["http://127.0.0.1:3080", "http://localhost:3080"],
+  "cors_origins": [
+    "http://127.0.0.1:3080",
+    "http://localhost:3080"
+  ],
   "stt": {
     "backend": "funasr",
     "model_name": "models/funasr/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
@@ -46,7 +49,7 @@
   },
   "digital_human": {
     "enabled": true,
-    "duix_base": "http://127.0.0.1:8383",
+    "duix_base": "http://127.0.0.1:9000",
     "data_dir": "D:/duix_avatar_data/face2face",
     "temp_dir": "temp",
     "avatar_video": "my_avatar.mp4",
@@ -55,5 +58,21 @@
     "submit_retry_sec": 5,
     "query_interval_sec": 2,
     "query_timeout_sec": 240
+  },
+  "omnivoice": {
+    "base": "http://<WSL2-IP>:9877",
+    "lang": "Chinese",
+    "ns": 32,
+    "gs": 2.0,
+    "dn": true,
+    "sp": 1.0,
+    "pp": true,
+    "po": true,
+    "timeout_sec": 120
+  },
+  "persona": {
+    "default_voice": "<voices 下的音色文件夹名>",
+    "default_avatar": "my_avatar.mp4",
+    "default_idle": "default"
   }
 }
