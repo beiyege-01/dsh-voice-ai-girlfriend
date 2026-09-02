@@ -722,6 +722,21 @@ def _dh_prune_videos() -> None:
             logger.info("DH prune: deleted old result %s", old.name)
         except Exception:  # noqa: BLE001
             logger.exception("DH prune failed on %s", old)
+    # 顺带清理 temp 根下的 DH 中间合成音频（*.wav）：DUIX 消费生成视频后
+    # 这些 wav 就没用了。保留最近 DH_MAX_KEEP 个（流水线在途的 wav 最多
+    # 个位数，200 个余量充足），删更旧的，防止长期运行无限累积。
+    if DH_TEMP_DIR.is_dir():
+        wavs = sorted(
+            (p for p in DH_TEMP_DIR.glob("*.wav") if p.is_file()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for old in wavs[DH_MAX_KEEP:]:
+            try:
+                old.unlink()
+                logger.info("DH prune: deleted old temp wav %s", old.name)
+            except Exception:  # noqa: BLE001
+                logger.exception("DH prune wav failed on %s", old)
 
 
 def _dh_record_history(code: str, video_file: str, text: str) -> None:
