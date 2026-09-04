@@ -466,7 +466,7 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
         width: `${widthVw}vw`,
         right: side === 'right' ? sidebarInset : undefined,
         left: side === 'left' ? 0 : undefined,
-        zIndex: 900,
+        zIndex: 9999,
         pointerEvents: 'none',
       }}
       aria-hidden="true"
