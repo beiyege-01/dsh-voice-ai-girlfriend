@@ -1,59 +1,65 @@
 /* Shared "chip" design language for the voice toolbar.
    Rendered on <span role="button"> — dsh's composer button forcing (gray/white)
    does not apply to spans, so hover/state animations are fully ours.
-   Inline styles carry the state COLORS; these classes carry motion. */
+   Everything here is tuned to feel AIRY and smooth, never abrupt:
+   slow eased transitions, small floats, soft glows. */
 
 .chip {
-  transition: transform 0.16s ease, box-shadow 0.2s ease, filter 0.2s ease;
+  transition:
+    transform 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.4s ease,
+    filter 0.4s ease;
   will-change: transform;
 }
 
-/* Hover: gentle pop + a colored halo. */
+/* Hover: a gentle lift + a soft halo (not a hard pop). */
 .chip:hover {
-  transform: translateY(-1px) scale(1.08);
-  box-shadow: 0 2px 10px rgba(56, 132, 255, 0.28), inset 0 0 0 1px rgba(56, 132, 255, 0.5);
+  transform: translateY(-1px) scale(1.045);
+  box-shadow:
+    0 3px 14px rgba(56, 132, 255, 0.16),
+    inset 0 0 0 1px rgba(56, 132, 255, 0.42);
 }
 
 .chip:active {
-  transform: scale(0.94);
+  transform: scale(0.97);
 }
 
-/* ON state: a soft breathing glow so you also FEEL it's live. */
+/* ON state: a calm breathing glow (long period, subtle amplitude). */
 .on {
-  animation: chip-breathe 2.6s ease-in-out infinite;
+  animation: chip-breathe 3.4s ease-in-out infinite;
 }
 
 @keyframes chip-breathe {
-  0%, 100% { box-shadow: inset 0 0 0 1px rgba(56, 132, 255, 0.5), 0 0 6px rgba(56, 132, 255, 0.15); }
-  50% { box-shadow: inset 0 0 0 1px rgba(56, 132, 255, 0.7), 0 0 14px rgba(56, 132, 255, 0.45); }
+  0%, 100% { box-shadow: inset 0 0 0 1px rgba(56, 132, 255, 0.45), 0 0 4px rgba(56, 132, 255, 0.08); }
+  50% { box-shadow: inset 0 0 0 1px rgba(56, 132, 255, 0.6), 0 0 11px rgba(56, 132, 255, 0.3); }
 }
 
-/* Mic listening (idle, awaiting speech): pulsing ring. */
+/* Mic listening: a soft, slow shimmer. */
 .listening {
-  animation: mic-listen 1.8s ease-in-out infinite;
+  animation: mic-listen 2.4s ease-in-out infinite;
 }
 
 @keyframes mic-listen {
-  0%, 100% { filter: none; }
-  50% { filter: drop-shadow(0 0 5px rgba(56, 132, 255, 0.7)); }
+  0%, 100% { filter: drop-shadow(0 0 1px rgba(56, 132, 255, 0)); }
+  50% { filter: drop-shadow(0 0 6px rgba(56, 132, 255, 0.45)); }
 }
 
-/* Mic recording (hearing voice): fast pulse + scale. */
+/* Mic recording: a gentle, organic pulse (easy on the eyes). */
 .rec {
-  animation: mic-rec 0.9s ease-in-out infinite;
+  animation: mic-rec 1.5s ease-in-out infinite;
 }
 
 @keyframes mic-rec {
-  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 2px rgba(34, 197, 94, 0.3)); }
-  50% { transform: scale(1.1); filter: drop-shadow(0 0 9px rgba(34, 197, 94, 0.75)); }
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 2px rgba(34, 197, 94, 0.18)); }
+  50% { transform: scale(1.06); filter: drop-shadow(0 0 8px rgba(34, 197, 94, 0.5)); }
 }
 
-/* TTS playing: the speaker chip emits live sound-wave ripples. */
+/* TTS playing: a smooth sound-wave ripple. */
 .playing {
-  animation: wave 0.9s ease-in-out infinite;
+  animation: wave 1.4s ease-in-out infinite;
 }
 
 @keyframes wave {
-  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 2px rgba(103, 158, 254, 0.35)); }
-  50% { transform: scale(1.12); filter: drop-shadow(0 0 10px rgba(103, 158, 254, 0.85)); }
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 2px rgba(103, 158, 254, 0.2)); }
+  50% { transform: scale(1.07); filter: drop-shadow(0 0 9px rgba(103, 158, 254, 0.6)); }
 }
