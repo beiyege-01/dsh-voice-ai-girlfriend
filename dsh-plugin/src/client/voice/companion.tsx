@@ -1,18 +1,25 @@
 /**
- * CompanionWindow: reproduces the original hf-realtime-voice right-side
- * animation in DSH — a full-height column on the right (default 55vw):
+ * CompanionWindow: the AI-girlfriend's live panel, shown as a small standalone
+ * framed card on the right of the viewport. Inside it the same hf-realtime-voice
+ * video pipeline runs:
  *
- *  - Idle: loops `bg-images` videos, advancing to the next on `ended`.
- *  - Speaking: while the ReplySpeaker is playing, cross-fades in a
- *    `task-videos` video (looping), then fades back to idle.
- *  - Draggable: an inner-edge handle resizes the column (240px–70vw,
- *    persisted) and double-clicking it flips the column to the left edge.
- *  - Toggle: `s2s.voice.companion` ('1'/'0', default on) hides it entirely.
+ *  - Background: two stacked <video> layers crossfade (0.8s) through the
+ *    `bg-images` videos (advance on `ended`, plus one hop per assistant reply);
+ *    static-image fallback when the folder has no video.
+ *  - Foreground: while the ReplySpeaker plays, a framed `task-videos` clip
+ *    crossfades in over the background and loops; the digital-human video (has
+ *    audio) overlays it when rendering.
  *
- * pointer-events:none on the column so chat interaction is never blocked;
- * only the drag handle is interactive.
+ * Note: visibility is driven by INV/INLINE `style.opacity` (not a hashed class)
+ * so the card is always painted regardless of the plugin's css-modules hashing.
+ * The card shell is styled inline too — a solid, rounded, bordered frame — so
+ * it reads as a distinct floating window instead of a page-bleed overlay.
+ *
+ * Drag: the inner-edge handle resizes width (persisted); double-click flips it
+ * to the left side. `s2s.voice.companion` ('1'/'0', default on) hides it.
  */
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pulls ui-conversation's SlotMap merge for PropsRuntime resolution.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -24,17 +31,18 @@ import css from './CompanionWindow.module.css'
 const WIDTH_KEY = 's2s.voice.companionW'
 const SIDE_KEY = 's2s.voice.companionSide'
 
-const MIN_WIDTH_VW = Math.max(10, 240 / window.innerWidth * 100) // ~240px
-const MAX_WIDTH_VW = 70
+const MIN_WIDTH = 180
+const MAX_WIDTH = 480
+const DEFAULT_WIDTH = 260
 
 function readWidth(): number {
   try {
     const value = Number.parseFloat(localStorage.getItem(WIDTH_KEY) ?? '')
-    if (Number.isFinite(value) && value >= MIN_WIDTH_VW && value <= MAX_WIDTH_VW) return value
+    if (Number.isFinite(value) && value >= MIN_WIDTH && value <= MAX_WIDTH) return value
   } catch {
     // fall through to default
   }
-  return 25
+  return DEFAULT_WIDTH
 }
 
 function readSide(): 'left' | 'right' {
@@ -50,15 +58,8 @@ const SIDEBAR_PANEL_SEL = '[data-dsh-panel]:not([data-dsh-bottom-panel])'
 
 /**
  * 右侧固定插件（dsh-better-sidebar 等）展开时占用的右侧宽度（px）。
- *
- * 数字人窗口据此贴到插件的左缘，而不是被它遮挡：
- *  - 未装插件 / 面板不存在        → 0（贴视口右缘，原逻辑）
- *  - 插件折叠（body 挂 data-dsh-sidebar-collapsed）→ 0
- *  - 面板展开（贴视口右缘）       → 视口宽 - 面板 left（即占位宽度）
- *  - 折叠/展开动画中面板滑出视口  → 0
- *
- * 用 MutationObserver（body 折叠标记/拖拽）+ ResizeObserver（面板尺寸）+ 轮询
- * 兜底（插件可能在数字人挂载后才懒加载），保证三种时序都收敛。
+ * 卡片据此避让到插件左缘，而不是被遮挡。用 MutationObserver + ResizeObserver
+ * + 轮询兜底，保证插件晚加载（懒加载 chunk）的时序也能收敛。
  */
 function useSidebarInset(): number {
   const [inset, setInset] = useState(0)
@@ -75,8 +76,6 @@ function useSidebarInset(): number {
       }
       const rect = panel.getBoundingClientRect()
       const w = window.innerWidth
-      // 展开时面板贴右缘（rect.right ≈ w），占位 = w - rect.left；
-      // 动画中 rect.left 越过视口（>= w）→ 计 0。
       if (rect.left > 0 && rect.left < w && rect.right >= w - 1) {
         setInset(Math.round(w - rect.left))
       } else {
@@ -96,7 +95,6 @@ function useSidebarInset(): number {
       }
     }
     bind()
-    // 插件可能晚于数字人挂载（懒加载 chunk）→ 轮询补绑观察
     const iv = window.setInterval(() => {
       if (document.querySelector(SIDEBAR_PANEL_SEL) && ro === null) bind()
     }, 2000)
@@ -109,42 +107,72 @@ function useSidebarInset(): number {
   return inset
 }
 
+/** A `bg-images` entry in the bridge media list. */
+interface BgMedia {
+  name: string
+  type: 'image' | 'video' | string
+}
+
 /** Full props: framework runtime share + `voice` locale seat + injected face. */
 export type CompanionWindowProps =
   PropsRuntime<'conversation.input.left'> & PropsLocale<'voice'> & VoiceInjected
+
+/** Inline base for every video layer: absolute, fill the card, crossfade via opacity. */
+const VIDEO_STYLE: CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  width: '100%',
+  height: '100%',
+  objectFit: 'cover',
+  transition: 'opacity 0.8s ease',
+  opacity: 0,
+}
 
 /**
  * @param props - framework runtime + locale + injected speaker face.
  */
 export const CompanionWindow = memo(function CompanionWindow({ speaker, companion }: CompanionWindowProps) {
   const [visible, setVisible] = useState<boolean>(companion.visible)
-  const [widthVw, setWidthVw] = useState<number>(readWidth)
+  const [widthPx, setWidthPx] = useState<number>(readWidth)
   const [side, setSide] = useState<'left' | 'right'>(readSide)
   const [speaking, setSpeaking] = useState<boolean>(speaker.speaking)
-  const [bgVideos, setBgVideos] = useState<string[]>([])
+
+  // Background media list (from bg-images) + the task-video list (task-videos).
+  const [bgMedia, setBgMedia] = useState<BgMedia[]>([])
   const [taskVideos, setTaskVideos] = useState<string[]>([])
-  const [bgIndex, setBgIndex] = useState(0)
-  const [taskIndex, setTaskIndex] = useState(0)
+  // Static-image background fallback (used when bg-images has no video).
+  const [bgImageUrl, setBgImageUrl] = useState('')
+
   // Digital human: bridge task state + the video currently being played.
   const [dh, setDh] = useState<DhStatus | null>(null)
   const [dhPlaying, setDhPlaying] = useState(false)
-  // Mirror of dhPlaying for the mount-time poll closure: driveDh is captured
-  // by the interval effect ([] deps), so reading the state variable there
-  // would always see the initial value — every poll would think playback is
-  // idle and restart the current segment (the "loops a segment" bug).
+  // Mirror of dhPlaying for the mount-time poll closure (see driveDh).
   const dhPlayingRef = useRef(false)
   const setDhPlayingBoth = useCallback((v: boolean) => {
     dhPlayingRef.current = v
     setDhPlaying(v)
   }, [])
-  const idleRef = useRef<HTMLVideoElement | null>(null)
-  const speakRef = useRef<HTMLVideoElement | null>(null)
+
+  // Background crossfade layers.
+  const bgA = useRef<HTMLVideoElement | null>(null)
+  const bgB = useRef<HTMLVideoElement | null>(null)
+  const bgActive = useRef(true)
+  const bgTransitioning = useRef(false)
+  const bgWired = useRef(false)
+  const bgIndexRef = useRef(-1)
+  const bgMediaRef = useRef<BgMedia[]>([])
+
+  // Foreground task/avatar frame.
+  const taskRef = useRef<HTMLVideoElement | null>(null)
+  const taskIndexRef = useRef(-1)
+  const taskPlayingRef = useRef(false)
+  const taskPendingStopRef = useRef(false)
+  const wasSpeakingRef = useRef(false)
+
+  // Digital-human frame.
   const dhRef = useRef<HTMLVideoElement | null>(null)
-  // Codes already handled (played / fallback-spoken / stale / discarded).
   const handledDhRef = useRef(new Set<string>())
-  // When we started waiting for the current generation (code + timestamp).
   const waitingDhRef = useRef<{ code: string; at: number } | null>(null)
-  // Segmented video playlist: pending absolute URLs, owner task code, played count.
   const dhQueueRef = useRef<string[]>([])
   const dhQueueCodeRef = useRef('')
   const dhQueuePlayedRef = useRef(0)
@@ -157,8 +185,6 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
 
   // Load media lists from the bridge on mount, then re-poll every 30 s so
   // videos dropped into the folders are picked up without a page refresh.
-  // Only list CHANGES update state (the playing video is not restarted when
-  // nothing changed).
   const mediaJsonRef = useRef('')
   useEffect(() => {
     let cancelled = false
@@ -166,22 +192,24 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
       try {
         const base = bridgeBase()
         const [bg, task] = await Promise.all([
-          fetch(`${base}/api/media/bg-images`).then(r => r.json() as Promise<{ media: { name: string; type: string }[] }>),
+          fetch(`${base}/api/media/bg-images`).then(r => r.json() as Promise<{ media: BgMedia[] }>),
           fetch(`${base}/api/media/task-videos`).then(r => r.json() as Promise<{ videos: string[] }>),
         ])
         if (cancelled) return
-        const json = JSON.stringify([bg.media, task.videos])
+        const media = Array.isArray(bg.media) ? bg.media : []
+        const videos = Array.isArray(task.videos) ? task.videos : []
+        const json = JSON.stringify([media, videos])
         if (json === mediaJsonRef.current) return
         mediaJsonRef.current = json
-        setBgVideos(bg.media.filter(m => m.type === 'video').map(m => `${base}/media/bg-images/${encodeURIComponent(m.name)}`))
-        setTaskVideos(task.videos.map(name => `${base}/media/task-videos/${encodeURIComponent(name)}`))
+        bgMediaRef.current = media
+        setBgMedia(media)
+        setTaskVideos(videos.map(name => `${base}/media/task-videos/${encodeURIComponent(name)}`))
       } catch (err) {
         console.error('[ui-voice] companion media list failed:', err)
       }
     }
     void load()
     const timer = window.setInterval(load, 30000)
-    // 外部通知（PersonaToggle 切换待机动画时触发）：立即重新拉取，不等 30s 轮询。
     const onPersonaChange = () => { void load() }
     window.addEventListener('dsh-voice:persona', onPersonaChange)
     return () => {
@@ -196,44 +224,167 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
     return speaker.subscribe(() => setSpeaking(speaker.speaking))
   }, [speaker])
 
-  // Idle layer: play bgVideos[bgIndex]; advance on ended.
-  useEffect(() => {
-    const vid = idleRef.current
-    const src = bgVideos[bgIndex % bgVideos.length]
-    if (vid === null || src === undefined) return
-    vid.src = src
-    void vid.play().catch(() => {})
-  }, [bgIndex, bgVideos])
-
-  // Rotate the speaking clip once per new reply (each speaking start).
-  const wasSpeakingRef = useRef(false)
-  useEffect(() => {
-    if (speaking && !wasSpeakingRef.current && taskVideos.length > 0) {
-      setTaskIndex(i => (i + 1) % taskVideos.length)
+  // ── Background crossfade (ported from hf-realtime-voice main.js) ──────────
+  const showBgMedia = useCallback((index: number) => {
+    const list = bgMediaRef.current
+    const entry = list[index]
+    if (!entry) return
+    const a = bgA.current
+    const b = bgB.current
+    if (!a || !b) return
+    const src = `${bridgeBase()}/media/bg-images/${encodeURIComponent(entry.name)}`
+    if (entry.type === 'video') {
+      setBgImageUrl('')
+      if (!bgWired.current) {
+        // First ever background: show it without a crossfade.
+        bgWired.current = true
+        const vid = bgActive.current ? a : b
+        vid.src = src
+        vid.style.opacity = '1'
+        vid.load()
+        void vid.play().catch(() => {})
+        return
+      }
+      // Cross-fade into the spare layer once it can play (avoids a black frame).
+      const from = bgActive.current ? a : b
+      const to = bgActive.current ? b : a
+      bgTransitioning.current = true
+      to.src = src
+      to.load()
+      const startFade = () => {
+        to.removeEventListener('canplay', startFade)
+        bgActive.current = !bgActive.current
+        from.style.opacity = '0'
+        to.style.opacity = '1'
+        void to.play().catch(() => {})
+        window.setTimeout(() => { bgTransitioning.current = false }, 900)
+      }
+      to.addEventListener('canplay', startFade)
+      window.setTimeout(() => { if (bgTransitioning.current) startFade() }, 3000)
+      return
     }
-    wasSpeakingRef.current = speaking
-  }, [speaking, taskVideos.length])
+    // Image fallback: hide the video layers, show a static background image.
+    a.style.opacity = '0'
+    b.style.opacity = '0'
+    a.pause()
+    b.pause()
+    bgActive.current = true
+    setBgImageUrl(`url("${src}")`)
+  }, [])
 
-  // Speaking layer: play taskVideos[taskIndex] while speaking; stop otherwise.
+  const advanceBgVideo = useCallback((): number => {
+    const list = bgMediaRef.current
+    if (list.length < 2) return -1
+    let next = bgIndexRef.current
+    for (let step = 0; step < list.length; step++) {
+      next = (next + 1) % list.length
+      if (list[next].type === 'video') {
+        bgIndexRef.current = next
+        showBgMedia(next)
+        return next
+      }
+    }
+    return -1
+  }, [showBgMedia])
+
+  const onBgVideoEnded = useCallback((event: React.SyntheticEvent<HTMLVideoElement>) => {
+    if (bgTransitioning.current) return
+    const visibleEl = bgActive.current ? bgA.current : bgB.current
+    if (event.currentTarget !== visibleEl) return
+    advanceBgVideo()
+  }, [advanceBgVideo])
+
+  /** Advance the background one video per assistant reply. */
+  const rotateBgReply = useCallback(() => {
+    const list = bgMediaRef.current
+    if (list.some(m => m.type === 'video')) {
+      advanceBgVideo()
+      return
+    }
+    if (list.length < 2) return
+    bgIndexRef.current = (bgIndexRef.current + 1) % list.length
+    showBgMedia(bgIndexRef.current)
+  }, [advanceBgVideo, showBgMedia])
+
+  // First background media (boot) once the list is loaded.
+  const bgInitRef = useRef(false)
   useEffect(() => {
-    const vid = speakRef.current
-    const src = taskVideos[taskIndex % taskVideos.length]
-    if (vid === null || src === undefined) return
-    if (speaking) {
-      vid.src = src
-      void vid.play().catch(() => {})
-    } else {
+    if (bgMedia.length === 0 || bgInitRef.current) return
+    bgInitRef.current = true
+    bgIndexRef.current = 0
+    showBgMedia(0)
+  }, [bgMedia, showBgMedia])
+
+  // ── Foreground task frame: show while speaking, loop, play out on end ─────
+  const hideTaskFrame = useCallback(() => {
+    const vid = taskRef.current
+    if (vid !== null) {
       vid.pause()
       vid.currentTime = 0
+      vid.style.opacity = '0'
     }
-  }, [speaking, taskIndex, taskVideos])
+    taskPlayingRef.current = false
+    taskPendingStopRef.current = false
+  }, [])
+
+  const onTaskEnded = useCallback(() => {
+    if (taskPendingStopRef.current) {
+      hideTaskFrame()
+      return
+    }
+    // Reply still going: loop so the animation never freezes on a black frame.
+    const vid = taskRef.current
+    if (vid !== null) {
+      vid.currentTime = 0
+      void vid.play().catch(() => {})
+    }
+  }, [hideTaskFrame])
+
+  useEffect(() => {
+    const vid = taskRef.current
+    if (speaking && !wasSpeakingRef.current) {
+      // New reply started.
+      if (taskVideos.length > 0) {
+        if (taskPlayingRef.current) vid?.pause()
+        taskPendingStopRef.current = false
+        taskPlayingRef.current = true
+        taskIndexRef.current = (taskIndexRef.current + 1) % taskVideos.length
+        const src = taskVideos[taskIndexRef.current]
+        if (vid !== null) {
+          vid.src = src
+          vid.style.opacity = '1'
+          vid.load()
+          const play = () => {
+            vid.removeEventListener('canplay', play)
+            void vid.play().catch(() => {})
+          }
+          vid.addEventListener('canplay', play)
+          window.setTimeout(() => {
+            if (taskPlayingRef.current && vid.paused) void vid.play().catch(() => {})
+          }, 3000)
+        }
+      }
+      // One background hop per reply (original: showNextBgMedia).
+      rotateBgReply()
+    } else if (!speaking && wasSpeakingRef.current) {
+      if (taskPlayingRef.current) {
+        taskPendingStopRef.current = true
+        window.setTimeout(() => { if (taskPendingStopRef.current) hideTaskFrame() }, 30000)
+      } else {
+        hideTaskFrame()
+      }
+      if (taskRef.current === null) hideTaskFrame()
+    }
+    wasSpeakingRef.current = speaking
+  }, [speaking, taskVideos, rotateBgReply, hideTaskFrame])
+
+  // The digital-human video, once playing, owns the foreground: hide any task
+  // frame so the two never compete.
+  useEffect(() => {
+    if (dhPlaying) hideTaskFrame()
+  }, [dhPlaying, hideTaskFrame])
 
   // Digital human: poll the bridge task state every 4 s and drive playback.
-  //  - done + no pending newer task -> play the video (it carries the TTS
-  //    audio muxed by DUIX, so video + voice start together, in sync)
-  //  - error / discarded / stale (newer task pending) -> never play
-  //  - error with no pending -> fall back to plain TTS so the reply is heard
-  //  - waiting too long (>90s) -> give up on the video, discard + speak TTS
   useEffect(() => {
     let cancelled = false
     const poll = async () => {
@@ -264,13 +415,12 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
     if (vid !== null) {
       vid.pause()
       vid.currentTime = 0
+      vid.style.opacity = '0'
     }
     setDhPlayingBoth(false)
   }, [setDhPlayingBoth])
 
   // 用户占用麦克风/说话（interruptReply）：停止数字人视频播放。
-  // 只停播放并作废当前任务的播放队列（防止轮询续播），不调用 dhDiscard、
-  // 不删文件——桥接的生成与存取逻辑完全不受影响。
   useEffect(() => {
     return companion.subscribeInterrupt(() => {
       stopDh()
@@ -290,6 +440,7 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
       setDhPlayingBoth(false)
       return
     }
+    vid.style.opacity = '1'
     vid.src = next
     void vid.play().catch(() => {})
     setDhPlayingBoth(true)
@@ -298,13 +449,11 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
   const driveDh = (status: DhStatus): void => {
     const code = status.code
     if (!code) return
-    // 数字人开关关闭：不生成/不播放任何数字人视频
     if (!readDigitalHuman()) {
       dhQueueRef.current = []
       stopDh()
       return
     }
-    // 新任务：重置播放队列（旧的未播视频作废）
     if (code !== dhQueueCodeRef.current) {
       dhQueueCodeRef.current = code
       dhQueueRef.current = []
@@ -334,14 +483,10 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
     }
     if (status.state === 'tts' || status.state === 'generating') {
       const now = Date.now()
-      // 等待超时按段数动态计算（每段 ~25s + 60s 基础）：多段任务（5-8 段
-      // 需 1-3 分钟）不能被固定 90s 误判为"太慢"而回退 TTS（那就是"只有
-      // 声音、没有视频"的根因）。只有 DUIX 真卡死（远超应有时间）才回退。
       const timeoutMs = 60000 + (status.total_segments || 1) * 25000
       if (waitingDhRef.current === null || waitingDhRef.current.code !== code) {
         waitingDhRef.current = { code, at: now }
       } else if (now - waitingDhRef.current.at > timeoutMs) {
-        // Generation taking too long: stop waiting, speak the reply directly.
         handledDhRef.current.add(code)
         waitingDhRef.current = null
         dhQueueRef.current = []
@@ -356,10 +501,6 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
       }
     }
     if (status.state === 'generating' || status.state === 'done') {
-      // 注意：不因 pending>0 跳过播放——连续对话里排队几乎是常态，跳过会
-      // 导致"生成了却不播"。当前任务该播就播；更晚的任务真正开始时
-      // （code 变化）会重置播放队列并接管。
-      // 把新产出的小段视频追加进播放队列（去重），有位置就接着播
       const base = bridgeBase()
       for (const v of status.videos ?? []) {
         const url = `${base}${v.video_url}`
@@ -376,13 +517,14 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
   }
 
   // A new reply takes over: stop the digital human video so its audio never
-  // overlaps the live TTS (a fresh reply generates its own video later).
+  // overlaps the live TTS.
   useEffect(() => {
     if (!speaking || !dhPlaying) return
     const vid = dhRef.current
     if (vid !== null) {
       vid.pause()
       vid.currentTime = 0
+      vid.style.opacity = '0'
     }
     setDhPlayingBoth(false)
   }, [speaking, dhPlaying, setDhPlayingBoth])
@@ -390,34 +532,23 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
   const onDhEnded = useCallback(() => {
     dhQueuePlayedRef.current += 1
     if (dhQueuePlayedRef.current < dhQueueRef.current.length) {
-      playNextDh() // 一段播完马上续接下一段
+      playNextDh()
     } else {
       setDhPlayingBoth(false)
+      const vid = dhRef.current
+      if (vid !== null) vid.style.opacity = '0'
     }
   }, [playNextDh, setDhPlayingBoth])
 
-  const onIdleEnded = useCallback(() => {
-    if (bgVideos.length > 1) setBgIndex(i => (i + 1) % bgVideos.length)
-  }, [bgVideos.length])
-
-  const onSpeakEnded = useCallback(() => {
-    // Keep looping the speaking clip while the reply is still playing.
-    const vid = speakRef.current
-    if (vid !== null && speaking) {
-      vid.currentTime = 0
-      void vid.play().catch(() => {})
-    }
-  }, [speaking])
-
-  // Drag: resize on move (persist the live value), flip side on double-click.
+  // Drag: resize width on move (persist the live value), flip side on double-click.
   const beginDrag = useCallback((clientX: number) => {
-    dragRef.current = { startX: clientX, startWidth: widthVw, current: widthVw }
+    dragRef.current = { startX: clientX, startWidth: widthPx, current: widthPx }
     const onMove = (move: PointerEvent) => {
       const drag = dragRef.current
       if (drag === null) return
-      const deltaVw = ((move.clientX - drag.startX) / window.innerWidth) * 100
-      drag.current = Math.min(MAX_WIDTH_VW, Math.max(MIN_WIDTH_VW, drag.startWidth + (side === 'right' ? -deltaVw : deltaVw)))
-      setWidthVw(drag.current)
+      const delta = move.clientX - drag.startX
+      drag.current = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, drag.startWidth + (side === 'right' ? -delta : delta)))
+      setWidthPx(drag.current)
     }
     const onUp = () => {
       const drag = dragRef.current
@@ -434,7 +565,7 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
-  }, [widthVw, side])
+  }, [widthPx, side])
 
   const flipSide = useCallback(() => {
     setSide((previous) => {
@@ -450,34 +581,47 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
 
   const dhBusy = dh !== null && (dh.state === 'tts' || dh.state === 'generating')
 
-  // 右侧固定插件（better-sidebar 等）展开时，贴到它的左缘而不是被遮挡。
-  // Hook 必须无条件调用（React 规则），放在条件 return 之前。
+  // 右侧固定插件展开时，贴到它的左缘而不是被遮挡。
   const sidebarInset = useSidebarInset()
 
-  if (!visible || (bgVideos.length === 0 && taskVideos.length === 0 && !dhPlaying && !dhBusy)) return null
+  const hasBgVideos = bgMedia.some(m => m.type === 'video')
+  const hasBgImages = bgMedia.some(m => m.type === 'image')
+  if (!visible || (!hasBgVideos && !hasBgImages && taskVideos.length === 0 && !dhPlaying && !dhBusy)) return null
+
+  // Portrait framing: height scales with width (capped to the viewport).
+  const heightPx = Math.round(Math.min(Math.max(widthPx * 1.5, 260), Math.min(560, window.innerHeight * 0.7)))
 
   return (
     <div
-      className={side === 'right' ? css.companion : `${css.companion} ${css.left}`}
+      className={side === 'right' ? css.card : `${css.card} ${css.left}`}
       style={{
         position: 'fixed',
-        top: 0,
-        bottom: 0,
-        width: `${widthVw}vw`,
-        right: side === 'right' ? sidebarInset : undefined,
-        left: side === 'left' ? 0 : undefined,
+        top: '50%',
+        transform: 'translateY(-50%)',
+        width: `${widthPx}px`,
+        height: `${heightPx}px`,
+        right: side === 'right' ? (sidebarInset ? sidebarInset + 12 : 12) : undefined,
+        left: side === 'left' ? 12 : undefined,
         zIndex: 9999,
         pointerEvents: 'none',
+        backgroundColor: '#0b0c10',
+        backgroundImage: bgImageUrl || undefined,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        border: '1px solid rgba(255,255,255,0.14)',
+        borderRadius: 22,
+        boxShadow: '0 28px 70px -28px rgba(0,0,0,0.78), 0 0 0 1px rgba(255,255,255,0.04), inset 0 1px 0 rgba(255,255,255,0.06)',
+        overflow: 'hidden',
       }}
       aria-hidden="true"
     >
-      {bgVideos.length > 0 && (
-        <video ref={idleRef} className={speaking || dhPlaying ? `${css.video} ${css.hidden}` : css.video} muted playsInline preload="auto" onEnded={onIdleEnded} />
-      )}
-      <video ref={dhRef} className={dhPlaying ? css.video : `${css.video} ${css.hidden}`} playsInline preload="auto" onEnded={onDhEnded} />
-      {taskVideos.length > 0 && (
-        <video ref={speakRef} className={speaking ? css.video : `${css.video} ${css.hidden}`} muted playsInline preload="auto" onEnded={onSpeakEnded} />
-      )}
+      {/* Background crossfade layers (idle loop) */}
+      <video ref={bgA} style={VIDEO_STYLE} muted playsInline preload="auto" onEnded={onBgVideoEnded} />
+      <video ref={bgB} style={VIDEO_STYLE} muted playsInline preload="auto" onEnded={onBgVideoEnded} />
+      {/* Foreground task/avatar frame */}
+      <video ref={taskRef} style={VIDEO_STYLE} muted playsInline preload="auto" onEnded={onTaskEnded} />
+      {/* Digital-human frame (carries the TTS audio) */}
+      <video ref={dhRef} style={VIDEO_STYLE} playsInline preload="auto" onEnded={onDhEnded} />
       {dhBusy && readDigitalHuman() && (
         <div className={css.dhCaption}>
           {dh.state === 'tts' ? '语音合成中…' : dh.message || '数字人生成中…'}
