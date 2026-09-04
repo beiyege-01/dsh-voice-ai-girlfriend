@@ -1,6 +1,8 @@
 # DSH 语音插件（ui-voice）
 
-这是 DSH（deepseek-harness）的**客户端插件**：麦克风输入、⚡插话/排队开关、语音朗读开关、AI 女友动画窗、句子级流式 TTS 朗读。它运行在 DSH 框架内（slot 系统、session prompt、locale），**不能独立运行**，必须装进 DSH 源码树。
+这是 DSH（deepseek-harness）的**客户端插件**：麦克风输入、⚡插话/排队开关、语音朗读开关、AI 女友动画窗、句子级流式 TTS 朗读。它运行在 DSH 框架内（slot 系统、session prompt、locale）。
+
+> 💡 **推荐安装（rc.8 与 dsh 0.1.3 通用，免改源码）**：直接 `dsh plugin --profile web add github:beiyege-01/dsh-voice-ai-girlfriend-plugin` —— 独立插件包形态，2026-09-05 已在 **dsh v0.1.3-alpha.1** 实测通过。以下「xcopy 嵌入源码树」是 rc.8 时代的本地开发路线（需在 harness 内 `tsc -b` + tsdown 构建），rc.8 上仍然可用；升级到 0.1.3 时优先用上面的 plugin-add 路线。
 
 ## 它做了什么
 
