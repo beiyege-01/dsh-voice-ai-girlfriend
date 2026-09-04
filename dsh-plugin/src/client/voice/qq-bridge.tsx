@@ -16,11 +16,14 @@ import { memo, useEffect, useRef } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pulls ui-conversation's SlotMap merge for PropsRuntime resolution.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import type { AssistantChatData } from '@deepseek-ai/dsh-client-ui-conversation/client'
+// Type-only: pulls ui-chat's `useChat` into SessionStandardProps (0.1.3).
+import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
+import type { AssistantChatData } from '@deepseek-ai/dsh-client-ui-chat/client'
 import { bridgeBase } from '../bridge.ts'
 import type { VoiceInjected } from '../contract.ts'
 import { readQqPush } from '../QqPushToggle.tsx'
 import { cleanReplyText } from './clean.ts'
+import { chatNodes } from './chat-nodes.ts'
 
 /** Full props: framework runtime share + `voice` locale seat + injected face. */
 export type QQBridgeProps = PropsRuntime<'conversation.input.left'> & PropsLocale<'voice'> & VoiceInjected
@@ -46,13 +49,15 @@ function nodeText(data: AssistantChatData): string {
 /**
  * @param props - framework runtime + locale + injected sendText.
  */
-export const QQBridge = memo(function QQBridge({ useSession, sendText }: QQBridgeProps) {
+export const QQBridge = memo(function QQBridge({ useSession, useChat, sendText }: QQBridgeProps) {
   const wsRef = useRef<WebSocket | null>(null)
   const lastReplyAnchorRef = useRef(0)
   // Last-segment debounce per user turn (see reply-listener): only a turn
   // that stays quiet for LAST_DEBOUNCE_MS submits its final segment.
   const qqLastDebounceRef = useRef(new Map<number, { timer: ReturnType<typeof setTimeout>; anchor: number }>())
   const LAST_DEBOUNCE_MS = 4000
+  // 0.1.3: read chat nodes via the `useChat` view snapshot (activates chat).
+  const chat = useChat((s: never) => s)
   const snapshot = useSession(s => s)
 
   // WS connect with auto-reconnect (3s). Only one tab should run this (the
@@ -97,13 +102,13 @@ export const QQBridge = memo(function QQBridge({ useSession, sendText }: QQBridg
   useEffect(() => {
     if (!readQqPush()) return
     const userAnchors: number[] = []
-    for (const node of snapshot.chat.nodes.values()) {
+    for (const node of chatNodes(chat)) {
       if (node.kind === 'user') userAnchors.push(node.anchorSeq)
     }
     userAnchors.sort((a, b) => a - b)
     type TurnPick = { anchor: number; text: string }
     const perUserTurn = new Map<number, { first: TurnPick; last: TurnPick }>()
-    for (const node of snapshot.chat.nodes.values()) {
+    for (const node of chatNodes(chat)) {
       if (node.kind !== 'assistant-step') continue
       const data = assistantData(node)
       if (data === undefined || data.status !== 'settled') continue
@@ -148,7 +153,7 @@ export const QQBridge = memo(function QQBridge({ useSession, sendText }: QQBridg
       }, LAST_DEBOUNCE_MS)
       qqLastDebounceRef.current.set(ua, { timer, anchor: last.anchor })
     }
-  }, [snapshot])
+  }, [chat])
 
   // Unmount: clear QQ debounce timers.
   useEffect(() => () => {

@@ -18,12 +18,15 @@ import { memo, useEffect, useRef, useState } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pulls ui-conversation's SlotMap merge for PropsRuntime resolution.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import type { AssistantChatData } from '@deepseek-ai/dsh-client-ui-conversation/client'
+// Type-only: pulls ui-chat's `useChat` into SessionStandardProps (0.1.3).
+import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
+import type { AssistantChatData } from '@deepseek-ai/dsh-client-ui-chat/client'
 import { tts, dhSpeak, dhStatus, dhDiscard } from '../bridge.ts'
 import { readDigitalHuman } from '../DigitalHumanToggle.tsx'
 import type { VoiceInjected } from '../contract.ts'
 import { cleanReplyText } from './clean.ts'
 import { splitSentences } from './sentences.ts'
+import { chatNodes } from './chat-nodes.ts'
 
 const VOICE_ENABLED_KEY = 's2s.voice.enabled'
 
@@ -67,13 +70,15 @@ export type ReplySpeakerMountProps =
  */
 export const ReplySpeakerMount = memo(function ReplySpeakerMount({
   useSession,
+  useChat,
   speaker,
   _registerTtsAbort,
   _registerInterruptHandler,
 }: ReplySpeakerMountProps) {
-  // Subscribe to the WHOLE snapshot (see T6: `s.chat.nodes` is a stable live
-  // store whose reference never changes, so selecting it would never re-render
-  // — the top-level snapshot object IS swapped on every publication).
+  // 0.1.3: chat nodes live on the `useChat` view snapshot (subscribing to it
+  // activates the chat target and materializes the nodes). Read them via the
+  // chatNodes helper; the rc.8 `snapshot.chat.nodes` map is gone.
+  const chat = useChat((s: never) => s)
   const snapshot = useSession(s => s)
 
   // Per-node complete sentences already spoken (node.key -> count).
@@ -175,7 +180,7 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
     if (interruptRef.current) {
       if (dhMode) dhDiscard(lastDhCodeRef.current)
       let maxAnchor = 0
-      for (const node of snapshot.chat.nodes.values()) {
+      for (const node of chatNodes(chat)) {
         if (node.kind === 'assistant-step' && node.anchorSeq > maxAnchor) maxAnchor = node.anchorSeq
       }
       if (maxAnchor > 0) skipAnchorRef.current = maxAnchor
@@ -190,7 +195,7 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
     if (baselineRef.current === null) {
       let maxAnchor = 0
       let hasSettled = false
-      for (const node of snapshot.chat.nodes.values()) {
+      for (const node of chatNodes(chat)) {
         if (node.kind !== 'assistant-step') continue
         const data = assistantData(node)
         if (data === undefined) continue
@@ -206,7 +211,7 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
 
     if (dhMode) {
       // New user turn after a DH-submitted reply: the pending video is stale.
-      for (const node of snapshot.chat.nodes.values()) {
+      for (const node of chatNodes(chat)) {
         if (node.kind !== 'user') continue
         if (node.anchorSeq <= lastUserAnchorRef.current) continue
         lastUserAnchorRef.current = node.anchorSeq
@@ -224,13 +229,13 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
       // output, transitional chatter, mid-work updates — never spawns a video.
       // (Pure chat turns have first === last and deliver once.)
       const userAnchors: number[] = []
-      for (const node of snapshot.chat.nodes.values()) {
+      for (const node of chatNodes(chat)) {
         if (node.kind === 'user') userAnchors.push(node.anchorSeq)
       }
       userAnchors.sort((a, b) => a - b)
       type TurnPick = { node: { key: string; anchorSeq: number }; data: AssistantChatData; anchor: number }
       const perUserTurn = new Map<number, { first: TurnPick; last: TurnPick }>()
-      for (const node of snapshot.chat.nodes.values()) {
+      for (const node of chatNodes(chat)) {
         if (node.kind !== 'assistant-step') continue
         const data = assistantData(node)
         if (data === undefined || data.status !== 'settled') continue
@@ -295,7 +300,7 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
     // flushes its trailing partial (the reply ended without a terminal
     // punctuation, like a credit line); running nodes wait for the partial.
     const jobs: { anchor: number; key: string; index: number; sentence: string }[] = []
-    for (const node of snapshot.chat.nodes.values()) {
+    for (const node of chatNodes(chat)) {
       if (node.kind !== 'assistant-step') continue
       if (node.anchorSeq <= skipUntilRef.current) continue
       if (node.anchorSeq === skipAnchorRef.current) continue
@@ -338,7 +343,7 @@ export const ReplySpeakerMount = memo(function ReplySpeakerMount({
       }),
       chainRef.current,
     )
-  }, [snapshot, speaker, _registerTtsAbort, dhResolved])
+  }, [chat, speaker, _registerTtsAbort, dhResolved])
 
   return null
 })
