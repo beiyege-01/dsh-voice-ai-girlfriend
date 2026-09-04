@@ -16,6 +16,7 @@ import { stt, VadStream } from './bridge.ts'
 import type { VoiceInjected } from './contract.ts'
 import { MicRecorder } from './voice/recorder.ts'
 import css from './MicButton.module.css'
+import chips from './chips.css'
 
 /** Full mic-control props: framework runtime share + `voice` locale seat + injected sendText. */
 export type MicButtonProps = PropsRuntime<'conversation.input.left'> & PropsLocale<'voice'> & VoiceInjected
@@ -160,6 +161,7 @@ export const MicButton = memo(function MicButton({ t, sendText, speaker, interru
         ? '识别中（深绿）'
         : voiceActive ? '收音中（绿）' : '待命（蓝）'
   const className = [
+    chips.chip,
     css.mic,
     phase === 'listening' ? css.listening : '',
     phase === 'transcribing' ? css.transcribing : '',

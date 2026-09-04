@@ -18,6 +18,7 @@ import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { bridgeBase } from './bridge.ts'
 import type { VoiceInjected } from './contract.ts'
+import chips from './chips.css'
 
 const PERSIST = {
   voice: 's2s.voice.persona.voice',
@@ -186,6 +187,7 @@ export const PersonaToggle = memo(function PersonaToggle({ t }: PropsRuntime<'co
       <span
         role="button"
         tabIndex={0}
+        className={chips.chip}
         title={`${hint}：当前「${label}」，点击切换到「${nextName}」`}
         aria-label={`${hint}：${label}`}
         style={{

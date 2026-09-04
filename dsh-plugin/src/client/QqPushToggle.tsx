@@ -9,6 +9,7 @@ import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { VoiceInjected } from './contract.ts'
 import { chipStyle, chipKey } from './chip.ts'
+import chips from './chips.css'
 
 const QQ_PUSH_KEY = 's2s.voice.qqPush'
 
@@ -52,6 +53,7 @@ export const QqPushToggle = memo(function QqPushToggle({ t }: QqPushToggleProps)
     <span
       role="button"
       tabIndex={0}
+      className={[chips.chip, on ? chips.on : ''].join(' ')}
       title={on ? t('qqpush.offHint') : t('qqpush.onHint')}
       aria-label={on ? t('qqpush.offHint') : t('qqpush.onHint')}
       aria-pressed={on}

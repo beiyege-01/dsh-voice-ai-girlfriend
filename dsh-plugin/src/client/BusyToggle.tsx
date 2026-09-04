@@ -12,6 +12,7 @@ import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { VoiceInjected } from './contract.ts'
 import { chipStyle, chipKey } from './chip.ts'
+import chips from './chips.css'
 
 const INTERRUPT_KEY = 's2s.voice.interrupt'
 
@@ -54,6 +55,7 @@ export const BusyToggle = memo(function BusyToggle({ t }: BusyToggleProps) {
     <span
       role="button"
       tabIndex={0}
+      className={[chips.chip, on ? chips.on : ''].join(' ')}
       title={on ? t('interrupt.onHint') : t('interrupt.offHint')}
       aria-label={on ? t('interrupt.onHint') : t('interrupt.offHint')}
       aria-pressed={on}

@@ -6,12 +6,13 @@
  * next reply. The mic input stays available regardless (the toggle controls
  * reading only).
  */
-import { memo, useCallback, useState } from 'react'
+import { memo, useCallback, useEffect, useState } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pulls ui-conversation's SlotMap merge for PropsRuntime resolution.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { VoiceInjected } from './contract.ts'
 import { chipStyle, chipKey } from './chip.ts'
+import chips from './chips.css'
 
 const VOICE_ENABLED_KEY = 's2s.voice.enabled'
 
@@ -42,6 +43,10 @@ function SpeakerIcon() {
  */
 export const VoiceToggle = memo(function VoiceToggle({ t, speaker, abortTts }: VoiceToggleProps) {
   const [on, setOn] = useState<boolean>(readEnabled)
+  const [speaking, setSpeaking] = useState<boolean>(speaker.speaking)
+
+  // Live "playing" animation while the reply speaker is actually reading.
+  useEffect(() => speaker.subscribe(() => setSpeaking(speaker.speaking)), [speaker])
 
   const toggle = useCallback(() => {
     setOn((previous) => {
@@ -63,6 +68,7 @@ export const VoiceToggle = memo(function VoiceToggle({ t, speaker, abortTts }: V
     <span
       role="button"
       tabIndex={0}
+      className={[chips.chip, on ? chips.on : '', speaking ? chips.playing : ''].join(' ')}
       title={on ? t('toggle.offHint') : t('toggle.onHint')}
       aria-label={on ? t('toggle.offHint') : t('toggle.onHint')}
       aria-pressed={on}

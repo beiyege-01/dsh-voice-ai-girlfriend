@@ -9,6 +9,7 @@ import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { VoiceInjected } from './contract.ts'
 import { chipStyle, chipKey } from './chip.ts'
+import chips from './chips.css'
 
 /** Full toggle props: framework runtime share + `voice` locale seat + injected face. */
 export type CompanionToggleProps =
@@ -40,6 +41,7 @@ export const CompanionToggle = memo(function CompanionToggle({ t, companion }: C
     <span
       role="button"
       tabIndex={0}
+      className={[chips.chip, on ? chips.on : ''].join(' ')}
       title={on ? t('companion.offHint') : t('companion.onHint')}
       aria-label={on ? t('companion.offHint') : t('companion.onHint')}
       aria-pressed={on}
