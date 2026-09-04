@@ -10,10 +10,17 @@
  *    crossfades in over the background and loops; the digital-human video (has
  *    audio) overlays it when rendering.
  *
- * Note: visibility is driven by INV/INLINE `style.opacity` (not a hashed class)
- * so the card is always painted regardless of the plugin's css-modules hashing.
- * The card shell is styled inline too — a solid, rounded, bordered frame — so
- * it reads as a distinct floating window instead of a page-bleed overlay.
+ * Layout/robustness notes:
+ *  - The card is ALWAYS mounted (the video elements never unmount). When the
+ *    companion is toggled off, or there is no media / no digital-human task, it
+ *    is hidden with inline `display:none` instead of `return null`. Returning
+ *    null would unmount the <video>s, and on re-mount the background would not
+ *    be re-wired (its "wired" refs persist), leaving an empty frame after a
+ *    single toggle.
+ *  - The video layers are shown/hidden with inline `style.opacity` (NOT a
+ *    hashed class), so they always paint regardless of css-modules hashing.
+ *  - Whenever the media list changes (idle/persona switch or files added), the
+ *    background is reset and the new idle group is shown immediately.
  *
  * Drag: the inner-edge handle resizes width (persisted); double-click flips it
  * to the left side. `s2s.voice.companion` ('1'/'0', default on) hides it.
@@ -58,8 +65,7 @@ const SIDEBAR_PANEL_SEL = '[data-dsh-panel]:not([data-dsh-bottom-panel])'
 
 /**
  * 右侧固定插件（dsh-better-sidebar 等）展开时占用的右侧宽度（px）。
- * 卡片据此避让到插件左缘，而不是被遮挡。用 MutationObserver + ResizeObserver
- * + 轮询兜底，保证插件晚加载（懒加载 chunk）的时序也能收敛。
+ * 卡片据此避让到插件左缘，而不是被遮挡。
  */
 function useSidebarInset(): number {
   const [inset, setInset] = useState(0)
@@ -140,13 +146,11 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
   // Background media list (from bg-images) + the task-video list (task-videos).
   const [bgMedia, setBgMedia] = useState<BgMedia[]>([])
   const [taskVideos, setTaskVideos] = useState<string[]>([])
-  // Static-image background fallback (used when bg-images has no video).
   const [bgImageUrl, setBgImageUrl] = useState('')
 
   // Digital human: bridge task state + the video currently being played.
   const [dh, setDh] = useState<DhStatus | null>(null)
   const [dhPlaying, setDhPlaying] = useState(false)
-  // Mirror of dhPlaying for the mount-time poll closure (see driveDh).
   const dhPlayingRef = useRef(false)
   const setDhPlayingBoth = useCallback((v: boolean) => {
     dhPlayingRef.current = v
@@ -177,52 +181,6 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
   const dhQueueCodeRef = useRef('')
   const dhQueuePlayedRef = useRef(0)
   const dragRef = useRef<{ startX: number; startWidth: number; current: number } | null>(null)
-
-  // Follow the shared companion visibility (the toggle flips it live).
-  useEffect(() => {
-    return companion.subscribe(() => setVisible(companion.visible))
-  }, [companion])
-
-  // Load media lists from the bridge on mount, then re-poll every 30 s so
-  // videos dropped into the folders are picked up without a page refresh.
-  const mediaJsonRef = useRef('')
-  useEffect(() => {
-    let cancelled = false
-    const load = async () => {
-      try {
-        const base = bridgeBase()
-        const [bg, task] = await Promise.all([
-          fetch(`${base}/api/media/bg-images`).then(r => r.json() as Promise<{ media: BgMedia[] }>),
-          fetch(`${base}/api/media/task-videos`).then(r => r.json() as Promise<{ videos: string[] }>),
-        ])
-        if (cancelled) return
-        const media = Array.isArray(bg.media) ? bg.media : []
-        const videos = Array.isArray(task.videos) ? task.videos : []
-        const json = JSON.stringify([media, videos])
-        if (json === mediaJsonRef.current) return
-        mediaJsonRef.current = json
-        bgMediaRef.current = media
-        setBgMedia(media)
-        setTaskVideos(videos.map(name => `${base}/media/task-videos/${encodeURIComponent(name)}`))
-      } catch (err) {
-        console.error('[ui-voice] companion media list failed:', err)
-      }
-    }
-    void load()
-    const timer = window.setInterval(load, 30000)
-    const onPersonaChange = () => { void load() }
-    window.addEventListener('dsh-voice:persona', onPersonaChange)
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-      window.removeEventListener('dsh-voice:persona', onPersonaChange)
-    }
-  }, [])
-
-  // Follow the speaker's speaking state.
-  useEffect(() => {
-    return speaker.subscribe(() => setSpeaking(speaker.speaking))
-  }, [speaker])
 
   // ── Background crossfade (ported from hf-realtime-voice main.js) ──────────
   const showBgMedia = useCallback((index: number) => {
@@ -257,7 +215,10 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
         from.style.opacity = '0'
         to.style.opacity = '1'
         void to.play().catch(() => {})
-        window.setTimeout(() => { bgTransitioning.current = false }, 900)
+        // Release the now-hidden layer's decoder so only ONE video decodes at a
+        // time (two full-res streams playing concurrently is what caused the
+        // page lag; the hidden layer is reused on the next crossfade).
+        window.setTimeout(() => { bgTransitioning.current = false; from.pause() }, 900)
       }
       to.addEventListener('canplay', startFade)
       window.setTimeout(() => { if (bgTransitioning.current) startFade() }, 3000)
@@ -306,14 +267,73 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
     showBgMedia(bgIndexRef.current)
   }, [advanceBgVideo, showBgMedia])
 
-  // First background media (boot) once the list is loaded.
-  const bgInitRef = useRef(false)
-  useEffect(() => {
-    if (bgMedia.length === 0 || bgInitRef.current) return
-    bgInitRef.current = true
+  /** Show the FIRST media of the CURRENT list (used on load and on any media list
+   *  change, e.g. an idle/persona switch) so the new idle group appears at once. */
+  const resetBg = useCallback(() => {
+    bgWired.current = false
+    bgActive.current = true
+    bgTransitioning.current = false
     bgIndexRef.current = 0
-    showBgMedia(0)
-  }, [bgMedia, showBgMedia])
+    const a = bgA.current
+    const b = bgB.current
+    if (a) {
+      a.pause()
+      a.style.opacity = '0'
+    }
+    if (b) {
+      b.pause()
+      b.style.opacity = '0'
+    }
+    if (bgMediaRef.current.length > 0) showBgMedia(0)
+  }, [showBgMedia])
+
+  // Load media lists from the bridge on mount, then re-poll every 30 s. Only
+  // list CHANGES update state; a change resets the background so a new idle
+  // group (persona switch) is shown immediately instead of waiting for `ended`.
+  const mediaJsonRef = useRef('')
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        const base = bridgeBase()
+        const [bg, task] = await Promise.all([
+          fetch(`${base}/api/media/bg-images`).then(r => r.json() as Promise<{ media: BgMedia[] }>),
+          fetch(`${base}/api/media/task-videos`).then(r => r.json() as Promise<{ videos: string[] }>),
+        ])
+        if (cancelled) return
+        const media = Array.isArray(bg.media) ? bg.media : []
+        const videos = Array.isArray(task.videos) ? task.videos : []
+        const json = JSON.stringify([media, videos])
+        if (json === mediaJsonRef.current) return
+        mediaJsonRef.current = json
+        bgMediaRef.current = media
+        setBgMedia(media)
+        setTaskVideos(videos.map(name => `${base}/media/task-videos/${encodeURIComponent(name)}`))
+        resetBg()
+      } catch (err) {
+        console.error('[ui-voice] companion media list failed:', err)
+      }
+    }
+    void load()
+    const timer = window.setInterval(load, 30000)
+    const onPersonaChange = () => { void load() }
+    window.addEventListener('dsh-voice:persona', onPersonaChange)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+      window.removeEventListener('dsh-voice:persona', onPersonaChange)
+    }
+  }, [resetBg])
+
+  // Follow the shared companion visibility (the toggle flips it live).
+  useEffect(() => {
+    return companion.subscribe(() => setVisible(companion.visible))
+  }, [companion])
+
+  // Follow the speaker's speaking state.
+  useEffect(() => {
+    return speaker.subscribe(() => setSpeaking(speaker.speaking))
+  }, [speaker])
 
   // ── Foreground task frame: show while speaking, loop, play out on end ─────
   const hideTaskFrame = useCallback(() => {
@@ -586,7 +606,10 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
 
   const hasBgVideos = bgMedia.some(m => m.type === 'video')
   const hasBgImages = bgMedia.some(m => m.type === 'image')
-  if (!visible || (!hasBgVideos && !hasBgImages && taskVideos.length === 0 && !dhPlaying && !dhBusy)) return null
+  const nothing = !hasBgVideos && !hasBgImages && taskVideos.length === 0 && !dhPlaying && !dhBusy
+  // Always render the card (videos never unmount); hide it with display:none when
+  // the companion is toggled off or there is nothing to show.
+  const shown = visible && !nothing
 
   // Portrait framing: height scales with width (capped to the viewport).
   const heightPx = Math.round(Math.min(Math.max(widthPx * 1.5, 260), Math.min(560, window.innerHeight * 0.7)))
@@ -604,6 +627,7 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
         left: side === 'left' ? 12 : undefined,
         zIndex: 9999,
         pointerEvents: 'none',
+        display: shown ? undefined : 'none',
         backgroundColor: '#0b0c10',
         backgroundImage: bgImageUrl || undefined,
         backgroundSize: 'cover',
@@ -618,10 +642,10 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
       {/* Background crossfade layers (idle loop) */}
       <video ref={bgA} style={VIDEO_STYLE} muted playsInline preload="auto" onEnded={onBgVideoEnded} />
       <video ref={bgB} style={VIDEO_STYLE} muted playsInline preload="auto" onEnded={onBgVideoEnded} />
-      {/* Foreground task/avatar frame */}
-      <video ref={taskRef} style={VIDEO_STYLE} muted playsInline preload="auto" onEnded={onTaskEnded} />
-      {/* Digital-human frame (carries the TTS audio) */}
-      <video ref={dhRef} style={VIDEO_STYLE} playsInline preload="auto" onEnded={onDhEnded} />
+      {/* Foreground task/avatar frame (load on demand) */}
+      <video ref={taskRef} style={VIDEO_STYLE} muted playsInline preload="metadata" onEnded={onTaskEnded} />
+      {/* Digital-human frame (load on demand, carries the TTS audio) */}
+      <video ref={dhRef} style={VIDEO_STYLE} playsInline preload="metadata" onEnded={onDhEnded} />
       {dhBusy && readDigitalHuman() && (
         <div className={css.dhCaption}>
           {dh.state === 'tts' ? '语音合成中…' : dh.message || '数字人生成中…'}
