@@ -652,7 +652,19 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
   const shown = visible && !nothing
 
   // Portrait framing: height scales with width (capped to the viewport).
-  const cardPos = (posRef.current ?? pos ?? defaultPos(widthPx, heightPx))
+  const cardPos = (() => {
+    const p = posRef.current ?? pos
+    if (p) {
+      // Clamp onto-screen in case a stale stored position is off-screen (e.g. a
+      // prior resize in a different viewport) — otherwise the card would render
+      // outside the viewport and appear "missing".
+      return {
+        x: Math.max(4, Math.min(window.innerWidth - widthPx - 4, p.x)),
+        y: Math.max(4, Math.min(window.innerHeight - heightPx - 4, p.y)),
+      }
+    }
+    return defaultPos(widthPx, heightPx)
+  })()
 
   return (
     <div
