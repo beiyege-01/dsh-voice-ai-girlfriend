@@ -459,7 +459,16 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
   return (
     <div
       className={side === 'right' ? css.companion : `${css.companion} ${css.left}`}
-      style={{ width: `${widthVw}vw`, right: side === 'right' ? sidebarInset : undefined, left: side === 'left' ? 0 : undefined }}
+      style={{
+        position: 'fixed',
+        top: 0,
+        bottom: 0,
+        width: `${widthVw}vw`,
+        right: side === 'right' ? sidebarInset : undefined,
+        left: side === 'left' ? 0 : undefined,
+        zIndex: 900,
+        pointerEvents: 'none',
+      }}
       aria-hidden="true"
     >
       {bgVideos.length > 0 && (
