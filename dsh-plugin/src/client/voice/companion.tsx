@@ -34,7 +34,7 @@ function readWidth(): number {
   } catch {
     // fall through to default
   }
-  return 55
+  return 25
 }
 
 function readSide(): 'left' | 'right' {
