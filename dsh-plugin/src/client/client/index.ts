@@ -1,0 +1,183 @@
+/**
+ * Browser voice plugin: the composer tool-row seat for the mic control.
+ *
+ * T5: capture (embedded mic-capture worklet) + silence endpointing ->
+ * bridge /api/stt -> conversation.send(text). T6 adds reply TTS playback;
+ * T7 the toggles; T8 the companion animation window.
+ */
+import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+// Type-only: pulls the locale plugin's Context merge (ctx.locale).
+import type {} from '@deepseek-ai/dsh-client-locale/client'
+// Type-only: pulls ui-conversation's SlotMap merge so PropsRuntime resolves.
+import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import { VoiceToolbar } from './VoiceToolbar.tsx'
+import { BalanceBadge } from './BalanceBadge.tsx'
+import { ReplySpeakerMount } from './voice/reply-listener.tsx'
+import { QQBridge } from './voice/qq-bridge.tsx'
+import { ReplySpeaker } from './voice/speaker.ts'
+import { CompanionWindow } from './voice/companion.tsx'
+import { CompanionController } from './voice/companion-controller.ts'
+import { bridgeBase } from './bridge.ts'
+import type { VoiceInjected } from './contract.ts'
+import { en, zh, type VoiceKey } from './locales.ts'
+
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface LocaleNamespaceMap {
+    /** The voice control's copy. */
+    voice: VoiceKey
+  }
+}
+
+/** Dictionary namespace owned by this plugin. */
+const NS = 'voice'
+
+/** Required services: the slot registry, this plugin's copy, and the sessions service. */
+export const inject = ['slots', 'locale', 'sessions']
+
+/**
+ * Client plugin body: register the `voice` dictionaries and the mic control
+ * into the composer tool row (`conversation.input.left`, a list seat beside
+ * the resident chrome — never replaces it). The injected `sendText` resolves
+ * the session-scoped conversation service at call time (scope addressing).
+ * @param ctx - client root context.
+ */
+export function apply(ctx: ClientContext): void {
+  // Diagnostic stamp: tells us which bundle build the browser actually runs.
+  console.log('[ui-voice] loaded, bridge =', bridgeBase())
+
+  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-voice: dictionaries')
+
+  // One shared speaker per plugin fiber: the reply listener plays through it
+  // and the companion window reads its `speaking` state.
+  const speaker = new ReplySpeaker()
+  ctx.effect(() => () => speaker.dispose(), 'ui-voice: speaker teardown')
+
+  // One shared companion controller: the window renders it, the toggle flips it.
+  const companion = new CompanionController()
+
+  // One shared TTS abort holder: the reply listener registers its current
+  // AbortController; the voice toggle aborts it when turned off so the bridge
+  // stops synthesizing (client disconnect) instead of draining its queue.
+  let activeTtsController: AbortController | null = null
+  // Barge-in handler registered by the reply listener (swallow the current
+  // reply when the user starts speaking).
+  let interruptHandler: (() => void) | null = null
+
+  const injectFace = (sessionId: SessionId | undefined): VoiceInjected => ({
+    sendText: async (text: string) => {
+      if (sessionId === undefined) throw new Error('[ui-voice] no session scope for sendText')
+      const binding = ctx.sessions.binding(sessionId)
+      const session = binding?.session
+      if (session === undefined) throw new Error('[ui-voice] session unavailable for sendText')
+      // Voice input must send IMMEDIATELY: when the agent's turn is still
+      // running (my reply streaming), a plain queue would sit as a pending
+      // item in the input dock, needing a manual send — the "second sentence
+      // stuck" bug. Default: steer, which interrupts the running turn.
+      // The BusyToggle flips this to pure queue for continuous conversation
+      // (let the current turn finish, then the sentence auto-sends).
+      const running = session.getSnapshot()?.running === true
+      let interrupt = true
+      try {
+        interrupt = localStorage.getItem('s2s.voice.interrupt') !== '0'
+      } catch {
+        // persistence unavailable — fall back to the interrupt default
+      }
+      const mode = running && interrupt ? 'steer' : 'queue'
+      const result = await session.prompt([{ type: 'text', text }], mode)
+      if (!result.ok) {
+        throw new Error(`[ui-voice] prompt failed: ${result.error.code}: ${result.error.message}`)
+      }
+    },
+    speaker,
+    companion,
+    abortTts: () => {
+      activeTtsController?.abort()
+      activeTtsController = null
+    },
+    // Internal wiring for the reply listener (not part of the public face
+    // contract, but typed as the shared holders the listener fills in).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    _registerTtsAbort: (controller: AbortController | null) => {
+      activeTtsController = controller
+    },
+    interruptReply: () => {
+      // Mic barge-in: stop playback, abort the in-flight TTS request, and ask
+      // the reply listener to swallow the rest of the current reply.
+      speaker.stop()
+      activeTtsController?.abort()
+      activeTtsController = null
+      // 用户占用麦克风/说话：同时停止数字人视频播放（只停播放，不涉及
+      // 桥接的生成任务与磁盘文件）。
+      companion.notifyMicInterrupt()
+      interruptHandler?.()
+    },
+    _registerInterruptHandler: (handler: (() => void) | null) => {
+      interruptHandler = handler
+    },
+  })
+
+  // ── composer tool controls live ABOVE the input card (conversation.input.dock):
+  //    one compact row (mic / toggles / bridge-status), so the card's own tool
+  //    row stays short and the model select keeps its place on the same line.
+  ctx.slots.inject('conversation.input.dock', () => ctx.slots.register(
+    {
+      name: 'conversation.input.dock',
+      id: 'voice-toolbar',
+      order: 0,
+      locale: NS,
+      inject: injectFace,
+    },
+    VoiceToolbar,
+  ))
+
+  // DeepSeek balance chip lives in the bottom status dock (next to the
+  // turns/steps/tool-time stats line): shows ¥/USD on load; click to refresh.
+  // Zero polling — the bridge caches the upstream answer 10 minutes.
+  ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register(
+    {
+      name: 'conversation.composer.dock',
+      id: 'voice-balance-badge',
+      order: 1,
+      locale: NS,
+      inject: injectFace,
+    },
+    BalanceBadge,
+  ))
+
+  // Hidden per-session reply listener: speaks finalized assistant text.
+  ctx.slots.inject('conversation.input.left', () => ctx.slots.register(
+    {
+      name: 'conversation.input.left',
+      id: 'voice-reply',
+      order: 90,
+      locale: NS,
+      inject: injectFace,
+    },
+    ReplySpeakerMount,
+  ))
+
+  // Full-height companion animation window (idle bg-images / speaking task-videos).
+  ctx.slots.inject('conversation.input.left', () => ctx.slots.register(
+    {
+      name: 'conversation.input.left',
+      id: 'voice-companion',
+      order: 95,
+      locale: NS,
+      inject: injectFace,
+    },
+    CompanionWindow,
+  ))
+
+  // Hidden QQ bridge: private-message inbound -> sendText; settled replies ->
+  // bridge -> TTS voice -> QQ. Renders null; no-op when qq disabled.
+  ctx.slots.inject('conversation.input.left', () => ctx.slots.register(
+    {
+      name: 'conversation.input.left',
+      id: 'voice-qq-bridge',
+      order: 96,
+      locale: NS,
+      inject: injectFace,
+    },
+    QQBridge,
+  ))
+}

@@ -1,0 +1,59 @@
+/* Shared "chip" design language for the voice toolbar.
+   Rendered on <span role="button"> — dsh's composer button forcing (gray/white)
+   does not apply to spans, so hover/state animations are fully ours.
+   Inline styles carry the state COLORS; these classes carry motion. */
+
+.chip {
+  transition: transform 0.16s ease, box-shadow 0.2s ease, filter 0.2s ease;
+  will-change: transform;
+}
+
+/* Hover: gentle pop + a colored halo. */
+.chip:hover {
+  transform: translateY(-1px) scale(1.08);
+  box-shadow: 0 2px 10px rgba(56, 132, 255, 0.28), inset 0 0 0 1px rgba(56, 132, 255, 0.5);
+}
+
+.chip:active {
+  transform: scale(0.94);
+}
+
+/* ON state: a soft breathing glow so you also FEEL it's live. */
+.on {
+  animation: chip-breathe 2.6s ease-in-out infinite;
+}
+
+@keyframes chip-breathe {
+  0%, 100% { box-shadow: inset 0 0 0 1px rgba(56, 132, 255, 0.5), 0 0 6px rgba(56, 132, 255, 0.15); }
+  50% { box-shadow: inset 0 0 0 1px rgba(56, 132, 255, 0.7), 0 0 14px rgba(56, 132, 255, 0.45); }
+}
+
+/* Mic listening (idle, awaiting speech): pulsing ring. */
+.listening {
+  animation: mic-listen 1.8s ease-in-out infinite;
+}
+
+@keyframes mic-listen {
+  0%, 100% { filter: none; }
+  50% { filter: drop-shadow(0 0 5px rgba(56, 132, 255, 0.7)); }
+}
+
+/* Mic recording (hearing voice): fast pulse + scale. */
+.rec {
+  animation: mic-rec 0.9s ease-in-out infinite;
+}
+
+@keyframes mic-rec {
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 2px rgba(34, 197, 94, 0.3)); }
+  50% { transform: scale(1.1); filter: drop-shadow(0 0 9px rgba(34, 197, 94, 0.75)); }
+}
+
+/* TTS playing: the speaker chip emits live sound-wave ripples. */
+.playing {
+  animation: wave 0.9s ease-in-out infinite;
+}
+
+@keyframes wave {
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 2px rgba(103, 158, 254, 0.35)); }
+  50% { transform: scale(1.12); filter: drop-shadow(0 0 10px rgba(103, 158, 254, 0.85)); }
+}
