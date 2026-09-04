@@ -12,7 +12,7 @@ import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { bridgeBase } from './bridge.ts'
 import type { VoiceInjected } from './contract.ts'
-import css from './BridgeStatus.module.css'
+import chips from './chips.css'
 
 /** URL of the companion repo with the full deploy guide. */
 const MAIN_REPO_URL = 'https://github.com/beiyege-01/dsh-voice-ai-girlfriend#readme'
@@ -66,14 +66,32 @@ export const BridgeStatus = memo(function BridgeStatus(_props: BridgeStatusProps
   if (ok !== false) return null
 
   return (
-    <button
-      type="button"
-      className={css.warn}
+    <span
+      role="button"
+      tabIndex={0}
+      className={chips.chip}
       title="未检测到 voice bridge —— 语音/QQ 功能不可用。点按查看部署指南"
       aria-label="未检测到 voice bridge —— 点按查看部署指南"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 30,
+        height: 30,
+        padding: 0,
+        border: 'none',
+        borderRadius: 9,
+        cursor: 'pointer',
+        margin: '0 4px',
+        background: 'color-mix(in srgb, var(--dsw-alias-state-danger-primary) 22%, transparent)',
+        color: 'var(--dsw-alias-state-danger-primary, #e5484d)',
+        boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--dsw-alias-state-danger-primary) 55%, transparent)',
+        transition: 'color .2s ease, background .2s ease, box-shadow .2s ease',
+      }}
       onClick={() => window.open(MAIN_REPO_URL, '_blank', 'noopener')}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); window.open(MAIN_REPO_URL, '_blank', 'noopener') } }}
     >
       <WarnIcon />
-    </button>
+    </span>
   )
 })
