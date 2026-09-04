@@ -1,8 +1,10 @@
 /**
  * CompanionWindow: the AI-girlfriend's live panel, shown as a small standalone
- * framed card on the right of the viewport. Inside it the same hf-realtime-voice
- * video pipeline runs:
+ * framed card. It is freely DRAGGABLE (drag anywhere on the card to reposition;
+ * double-click resets to the default right-center spot) and resizable via the
+ * bottom-right corner handle. Position + width persist in localStorage.
  *
+ * Inside it the same hf-realtime-voice video pipeline runs:
  *  - Background: two stacked <video> layers crossfade (0.8s) through the
  *    `bg-images` videos (advance on `ended`, plus one hop per assistant reply);
  *    static-image fallback when the folder has no video.
@@ -10,20 +12,14 @@
  *    crossfades in over the background and loops; the digital-human video (has
  *    audio) overlays it when rendering.
  *
- * Layout/robustness notes:
- *  - The card is ALWAYS mounted (the video elements never unmount). When the
- *    companion is toggled off, or there is no media / no digital-human task, it
- *    is hidden with inline `display:none` instead of `return null`. Returning
- *    null would unmount the <video>s, and on re-mount the background would not
- *    be re-wired (its "wired" refs persist), leaving an empty frame after a
- *    single toggle.
- *  - The video layers are shown/hidden with inline `style.opacity` (NOT a
- *    hashed class), so they always paint regardless of css-modules hashing.
- *  - Whenever the media list changes (idle/persona switch or files added), the
- *    background is reset and the new idle group is shown immediately.
- *
- * Drag: the inner-edge handle resizes width (persisted); double-click flips it
- * to the left side. `s2s.voice.companion` ('1'/'0', default on) hides it.
+ * Robustness:
+ *  - The card is ALWAYS mounted (videos never unmount). When the companion is
+ *    toggled off, or there is no media / no digital-human task, it is hidden
+ *    with inline `display:none` instead of `return null` (returning null would
+ *    unmount the <video>s, and on re-mount the background is not re-wired).
+ *  - Video visibility is driven by inline `style.opacity`, not a hashed class.
+ *  - On any media-list change (idle/persona switch) the background resets and
+ *    shows the new idle group immediately.
  */
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
@@ -36,7 +32,7 @@ import type { VoiceInjected } from '../contract.ts'
 import css from './CompanionWindow.module.css'
 
 const WIDTH_KEY = 's2s.voice.companionW'
-const SIDE_KEY = 's2s.voice.companionSide'
+const POS_KEY = 's2s.voice.companionPos'
 
 const MIN_WIDTH = 180
 const MAX_WIDTH = 480
@@ -52,11 +48,24 @@ function readWidth(): number {
   return DEFAULT_WIDTH
 }
 
-function readSide(): 'left' | 'right' {
+/** Load a previously dragged position, or null if the user never moved it. */
+function readPos(): { x: number; y: number } | null {
   try {
-    return localStorage.getItem(SIDE_KEY) === 'left' ? 'left' : 'right'
+    const value = JSON.parse(localStorage.getItem(POS_KEY) ?? 'null') as { x?: number; y?: number } | null
+    if (value && Number.isFinite(value.x) && Number.isFinite(value.y)) {
+      return { x: Math.round(value.x as number), y: Math.round(value.y as number) }
+    }
   } catch {
-    return 'right'
+    // ignore malformed / absent
+  }
+  return null
+}
+
+/** Default spot: right side, vertically centered, with a small viewport margin. */
+function defaultPos(w: number, h: number): { x: number; y: number } {
+  return {
+    x: Math.max(12, window.innerWidth - w - 12),
+    y: Math.max(12, Math.round((window.innerHeight - h) / 2)),
   }
 }
 
@@ -140,7 +149,7 @@ const VIDEO_STYLE: CSSProperties = {
 export const CompanionWindow = memo(function CompanionWindow({ speaker, companion }: CompanionWindowProps) {
   const [visible, setVisible] = useState<boolean>(companion.visible)
   const [widthPx, setWidthPx] = useState<number>(readWidth)
-  const [side, setSide] = useState<'left' | 'right'>(readSide)
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(readPos)
   const [speaking, setSpeaking] = useState<boolean>(speaker.speaking)
 
   // Background media list (from bg-images) + the task-video list (task-videos).
@@ -180,7 +189,14 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
   const dhQueueRef = useRef<string[]>([])
   const dhQueueCodeRef = useRef('')
   const dhQueuePlayedRef = useRef(0)
+
+  // Drag-move state.
+  const moveRef = useRef<{ startX: number; startY: number; base: { x: number; y: number } } | null>(null)
+  const posRef = useRef<{ x: number; y: number } | null>(pos)
   const dragRef = useRef<{ startX: number; startWidth: number; current: number } | null>(null)
+
+  // Portrait framing: height scales with width (capped to the viewport).
+  const heightPx = Math.round(Math.min(Math.max(widthPx * 1.5, 260), Math.min(560, window.innerHeight * 0.7)))
 
   // ── Background crossfade (ported from hf-realtime-voice main.js) ──────────
   const showBgMedia = useCallback((index: number) => {
@@ -216,8 +232,7 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
         to.style.opacity = '1'
         void to.play().catch(() => {})
         // Release the now-hidden layer's decoder so only ONE video decodes at a
-        // time (two full-res streams playing concurrently is what caused the
-        // page lag; the hidden layer is reused on the next crossfade).
+        // time (two full-res streams playing concurrently caused page lag).
         window.setTimeout(() => { bgTransitioning.current = false; from.pause() }, 900)
       }
       to.addEventListener('canplay', startFade)
@@ -560,14 +575,54 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
     }
   }, [playNextDh, setDhPlayingBoth])
 
-  // Drag: resize width on move (persist the live value), flip side on double-click.
-  const beginDrag = useCallback((clientX: number) => {
+  // ── Drag to reposition ────────────────────────────────────────────────────
+  const beginMove = useCallback((clientX: number, clientY: number) => {
+    if (moveRef.current !== null) return
+    const base = posRef.current ?? defaultPos(widthPx, heightPx)
+    moveRef.current = { startX: clientX, startY: clientY, base }
+    const onMove = (move: PointerEvent) => {
+      const m = moveRef.current
+      if (m === null) return
+      const nx = m.base.x + (move.clientX - m.startX)
+      const ny = m.base.y + (move.clientY - m.startY)
+      const cx = Math.max(0, Math.min(window.innerWidth - widthPx, nx))
+      const cy = Math.max(0, Math.min(window.innerHeight - heightPx, ny))
+      setPos({ x: cx, y: cy })
+      posRef.current = { x: cx, y: cy }
+    }
+    const onUp = () => {
+      moveRef.current = null
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      try {
+        localStorage.setItem(POS_KEY, JSON.stringify(posRef.current ?? { x: 0, y: 0 }))
+      } catch {
+        // ignore
+      }
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }, [widthPx, heightPx])
+
+  const resetPos = useCallback(() => {
+    const next = defaultPos(widthPx, heightPx)
+    setPos(next)
+    posRef.current = next
+    try {
+      localStorage.setItem(POS_KEY, JSON.stringify(next))
+    } catch {
+      // ignore
+    }
+  }, [widthPx, heightPx])
+
+  // Resize width; height scales proportionally (persisted).
+  const beginResize = useCallback((clientX: number) => {
     dragRef.current = { startX: clientX, startWidth: widthPx, current: widthPx }
     const onMove = (move: PointerEvent) => {
       const drag = dragRef.current
       if (drag === null) return
       const delta = move.clientX - drag.startX
-      drag.current = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, drag.startWidth + (side === 'right' ? -delta : delta)))
+      drag.current = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, drag.startWidth + delta))
       setWidthPx(drag.current)
     }
     const onUp = () => {
@@ -585,24 +640,9 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
-  }, [widthPx, side])
-
-  const flipSide = useCallback(() => {
-    setSide((previous) => {
-      const next = previous === 'right' ? 'left' : 'right'
-      try {
-        localStorage.setItem(SIDE_KEY, next)
-      } catch {
-        // ignore
-      }
-      return next
-    })
-  }, [])
+  }, [widthPx])
 
   const dhBusy = dh !== null && (dh.state === 'tts' || dh.state === 'generating')
-
-  // 右侧固定插件展开时，贴到它的左缘而不是被遮挡。
-  const sidebarInset = useSidebarInset()
 
   const hasBgVideos = bgMedia.some(m => m.type === 'video')
   const hasBgImages = bgMedia.some(m => m.type === 'image')
@@ -612,21 +652,20 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
   const shown = visible && !nothing
 
   // Portrait framing: height scales with width (capped to the viewport).
-  const heightPx = Math.round(Math.min(Math.max(widthPx * 1.5, 260), Math.min(560, window.innerHeight * 0.7)))
+  const cardPos = (posRef.current ?? pos ?? defaultPos(widthPx, heightPx))
 
   return (
     <div
-      className={side === 'right' ? css.card : `${css.card} ${css.left}`}
+      className={css.card}
       style={{
         position: 'fixed',
-        top: '50%',
-        transform: 'translateY(-50%)',
+        left: `${cardPos.x}px`,
+        top: `${cardPos.y}px`,
         width: `${widthPx}px`,
         height: `${heightPx}px`,
-        right: side === 'right' ? (sidebarInset ? sidebarInset + 12 : 12) : undefined,
-        left: side === 'left' ? 12 : undefined,
         zIndex: 9999,
-        pointerEvents: 'none',
+        pointerEvents: 'auto',
+        cursor: 'move',
         display: shown ? undefined : 'none',
         backgroundColor: '#0b0c10',
         backgroundImage: bgImageUrl || undefined,
@@ -636,8 +675,12 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
         borderRadius: 22,
         boxShadow: '0 28px 70px -28px rgba(0,0,0,0.78), 0 0 0 1px rgba(255,255,255,0.04), inset 0 1px 0 rgba(255,255,255,0.06)',
         overflow: 'hidden',
+        userSelect: 'none',
       }}
       aria-hidden="true"
+      onPointerDown={(event) => beginMove(event.clientX, event.clientY)}
+      onDoubleClick={resetPos}
+      title="拖动移动,双击回默认位"
     >
       {/* Background crossfade layers (idle loop) */}
       <video ref={bgA} style={VIDEO_STYLE} muted playsInline preload="auto" onEnded={onBgVideoEnded} />
@@ -651,14 +694,14 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
           {dh.state === 'tts' ? '语音合成中…' : dh.message || '数字人生成中…'}
         </div>
       )}
+      {/* Resize handle (bottom-right corner) */}
       <div
         className={css.handle}
         onPointerDown={(event) => {
-          event.preventDefault()
-          beginDrag(event.clientX)
+          event.stopPropagation()
+          beginResize(event.clientX)
         }}
-        onDoubleClick={flipSide}
-        title="拖动调宽,双击换边"
+        title="拖动调宽"
       />
     </div>
   )

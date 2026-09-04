@@ -1,6 +1,7 @@
 /* Companion card: the shell (position/size/border/shadow/background) is styled
-   inline in companion.tsx. Only the interactive handle + status pill live here.
-   NOTE: build.mjs now guards the md5 hash so every scoped class starts with a
+   inline in companion.tsx (draggable via drag-anywhere + bottom-right corner
+   resize). Only the resize grip + status pill live here.
+   NOTE: build.mjs guards the md5 hash so every scoped class starts with a
    letter (a class beginning with a digit is an invalid CSS selector and the
    whole rule is dropped). */
 
@@ -8,26 +9,26 @@
   position: relative;
 }
 
-/* Inner-edge drag handle: the only interactive part of the card. */
+/* Bottom-right corner resize grip. */
 .handle {
   position: absolute;
-  top: 0;
   bottom: 0;
-  left: 0;
-  width: 8px;
-  cursor: col-resize;
-  pointer-events: auto;
-  background: transparent;
-  transition: background 0.2s ease;
-}
-
-.card.left .handle {
-  left: auto;
   right: 0;
+  width: 22px;
+  height: 22px;
+  cursor: nwse-resize;
+  pointer-events: auto;
+  border-bottom-right-radius: 20px;
+  background: linear-gradient(135deg, transparent 52%, rgba(255, 255, 255, 0.28) 52%, rgba(255, 255, 255, 0.28) 62%, transparent 62%),
+    linear-gradient(135deg, transparent 52%, rgba(255, 255, 255, 0.18) 52%, rgba(255, 255, 255, 0.18) 62%, transparent 62%);
+  background-position: 0 0, 6px 6px;
+  background-repeat: no-repeat;
+  background-size: 16px 16px;
+  transition: background-color 0.2s ease;
 }
 
 .handle:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background-color: rgba(255, 255, 255, 0.14);
 }
 
 /* Digital-human generation status pill (bottom of the card, padded). */
