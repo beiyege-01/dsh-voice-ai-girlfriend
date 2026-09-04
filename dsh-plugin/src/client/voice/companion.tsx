@@ -642,6 +642,22 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
     window.addEventListener('pointerup', onUp)
   }, [widthPx])
 
+  // Re-clamp the saved position whenever the viewport resizes (e.g. opening or
+  // closing devtools) so the card can never be left off-screen and look "gone".
+  useEffect(() => {
+    const onResize = () => {
+      if (posRef.current === null) return
+      const cl = {
+        x: Math.max(4, Math.min(window.innerWidth - widthPx - 4, posRef.current.x)),
+        y: Math.max(4, Math.min(window.innerHeight - heightPx - 4, posRef.current.y)),
+      }
+      posRef.current = cl
+      setPos(cl)
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [widthPx, heightPx])
+
   const dhBusy = dh !== null && (dh.state === 'tts' || dh.state === 'generating')
 
   const hasBgVideos = bgMedia.some(m => m.type === 'video')
@@ -690,17 +706,23 @@ export const CompanionWindow = memo(function CompanionWindow({ speaker, companio
         userSelect: 'none',
       }}
       aria-hidden="true"
-      onPointerDown={(event) => beginMove(event.clientX, event.clientY)}
+      draggable={false}
+      onPointerDown={(event) => {
+        // preventDefault blocks the browser's native (video/img) drag so the
+        // card doesn't get "dragged away" when the user tries to move it.
+        event.preventDefault()
+        beginMove(event.clientX, event.clientY)
+      }}
       onDoubleClick={resetPos}
       title="拖动移动,双击回默认位"
     >
       {/* Background crossfade layers (idle loop) */}
-      <video ref={bgA} style={VIDEO_STYLE} muted playsInline preload="auto" onEnded={onBgVideoEnded} />
-      <video ref={bgB} style={VIDEO_STYLE} muted playsInline preload="auto" onEnded={onBgVideoEnded} />
+      <video ref={bgA} style={VIDEO_STYLE} muted playsInline preload="auto" draggable={false} onEnded={onBgVideoEnded} />
+      <video ref={bgB} style={VIDEO_STYLE} muted playsInline preload="auto" draggable={false} onEnded={onBgVideoEnded} />
       {/* Foreground task/avatar frame (load on demand) */}
-      <video ref={taskRef} style={VIDEO_STYLE} muted playsInline preload="metadata" onEnded={onTaskEnded} />
+      <video ref={taskRef} style={VIDEO_STYLE} muted playsInline preload="metadata" draggable={false} onEnded={onTaskEnded} />
       {/* Digital-human frame (load on demand, carries the TTS audio) */}
-      <video ref={dhRef} style={VIDEO_STYLE} playsInline preload="metadata" onEnded={onDhEnded} />
+      <video ref={dhRef} style={VIDEO_STYLE} playsInline preload="metadata" draggable={false} onEnded={onDhEnded} />
       {dhBusy && readDigitalHuman() && (
         <div className={css.dhCaption}>
           {dh.state === 'tts' ? '语音合成中…' : dh.message || '数字人生成中…'}
