@@ -14,7 +14,9 @@
 }
 
 .bubbleOn {
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 18%, transparent) !important;
   color: var(--dsw-alias-state-business-primary);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsw-alias-state-business-primary) 55%, transparent) !important;
 }
 
 .bubbleOn:hover {

@@ -1,11 +1,11 @@
 .toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 0 8px;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  padding: 6px 10px !important;
   /* Sits in conversation.input.dock — its own row right above the composer
-     card. Keep it slim so it never pushes the card around. */
+     card. The !important beats a host layout override that forced block. */
 }
 
 /* Restrained chip backdrop for every icon in the row: an ultra-faint neutral
