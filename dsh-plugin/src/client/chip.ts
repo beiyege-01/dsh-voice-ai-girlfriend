@@ -24,6 +24,7 @@ export function chipStyle(on: boolean): CSSProperties {
     borderRadius: 9,
     cursor: 'pointer',
     flex: '0 0 auto',
+    margin: '0 4px',
     background: on
       ? `color-mix(in srgb, ${prim} 22%, transparent)`
       : 'rgba(127,127,127,0.14)',

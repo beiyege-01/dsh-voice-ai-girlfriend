@@ -18,7 +18,6 @@ import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { bridgeBase } from './bridge.ts'
 import type { VoiceInjected } from './contract.ts'
-import css from './PersonaToggle.module.css'
 
 const PERSIST = {
   voice: 's2s.voice.persona.voice',
@@ -182,17 +181,34 @@ export const PersonaToggle = memo(function PersonaToggle({ t }: PropsRuntime<'co
       return next?.label ?? ''
     })()
     const hint = t(meta.hintKey)
+    const prim = 'var(--dsw-alias-state-business-primary)'
     return (
-      <button
-        type="button"
-        className={css.pill}
+      <span
+        role="button"
+        tabIndex={0}
         title={`${hint}：当前「${label}」，点击切换到「${nextName}」`}
         aria-label={`${hint}：${label}`}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 5,
+          padding: '3px 9px',
+          borderRadius: 999,
+          cursor: 'pointer',
+          margin: '0 5px',
+          background: `color-mix(in srgb, ${prim} 18%, transparent)`,
+          color: prim,
+          boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${prim} 55%, transparent)`,
+          transition: 'color .2s ease, background .2s ease, box-shadow .2s ease',
+          fontSize: 12,
+          lineHeight: 1,
+        }}
         onClick={() => cycle(kind)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cycle(kind) } }}
       >
-        <span className={css.icon}><Icon /></span>
-        <span className={css.label}>{label}</span>
-      </button>
+        <Icon />
+        <span>{label}</span>
+      </span>
     )
   }
 
