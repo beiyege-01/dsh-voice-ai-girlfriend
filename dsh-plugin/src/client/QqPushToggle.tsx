@@ -1,16 +1,14 @@
 /**
  * QqPushToggle: composer tool-row switch for automatic QQ reply push.
- *
- * When ON (default), every settled reply is voiced to the configured QQ.
- * When OFF, the QQBridge skips pushing (your PC chat stays silent to QQ).
- * Persisted in localStorage `s2s.voice.qqPush` ('1'/'0', default on).
+ * ON (default): every settled reply is voiced to the configured QQ.
+ * OFF: the QQBridge skips pushing.
  */
 import { memo, useCallback, useState } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pulls ui-conversation's SlotMap merge for PropsRuntime resolution.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { VoiceInjected } from './contract.ts'
-import css from './QqPushToggle.module.css'
+import { chipStyle, chipKey } from './chip.ts'
 
 const QQ_PUSH_KEY = 's2s.voice.qqPush'
 
@@ -35,9 +33,6 @@ function BubbleIcon() {
   )
 }
 
-/**
- * @param props - framework runtime + locale seats.
- */
 export const QqPushToggle = memo(function QqPushToggle({ t }: QqPushToggleProps) {
   const [on, setOn] = useState<boolean>(readQqPush)
 
@@ -54,15 +49,17 @@ export const QqPushToggle = memo(function QqPushToggle({ t }: QqPushToggleProps)
   }, [])
 
   return (
-    <button
-      type="button"
-      className={on ? css.bubbleOn : css.bubbleOff}
+    <span
+      role="button"
+      tabIndex={0}
       title={on ? t('qqpush.offHint') : t('qqpush.onHint')}
       aria-label={on ? t('qqpush.offHint') : t('qqpush.onHint')}
       aria-pressed={on}
+      style={chipStyle(on)}
       onClick={toggle}
+      onKeyDown={chipKey}
     >
       <BubbleIcon />
-    </button>
+    </span>
   )
 })

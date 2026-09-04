@@ -8,15 +8,13 @@ import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots
 // Type-only: pulls ui-conversation's SlotMap merge for PropsRuntime resolution.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { VoiceInjected } from './contract.ts'
-import css from './CompanionToggle.module.css'
+import { chipStyle, chipKey } from './chip.ts'
 
 /** Full toggle props: framework runtime share + `voice` locale seat + injected face. */
 export type CompanionToggleProps =
   PropsRuntime<'conversation.input.left'> & PropsLocale<'voice'> & VoiceInjected
 
-/** Girl-in-window glyph: a rounded window frame holding a person's silhouette
- *  on the RIGHT side of the window (the companion column sits on the right).
- *  Inline, follows currentColor. */
+/** Girl-in-window glyph (inline, follows currentColor). */
 function DisplayIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -29,9 +27,6 @@ function DisplayIcon() {
   )
 }
 
-/**
- * @param props - framework runtime + locale + injected companion controller.
- */
 export const CompanionToggle = memo(function CompanionToggle({ t, companion }: CompanionToggleProps) {
   const [on, setOn] = useState<boolean>(companion.visible)
 
@@ -42,15 +37,17 @@ export const CompanionToggle = memo(function CompanionToggle({ t, companion }: C
   }, [companion])
 
   return (
-    <button
-      type="button"
-      className={on ? css.displayOn : css.displayOff}
+    <span
+      role="button"
+      tabIndex={0}
       title={on ? t('companion.offHint') : t('companion.onHint')}
       aria-label={on ? t('companion.offHint') : t('companion.onHint')}
       aria-pressed={on}
+      style={chipStyle(on)}
       onClick={toggle}
+      onKeyDown={chipKey}
     >
       <DisplayIcon />
-    </button>
+    </span>
   )
 })

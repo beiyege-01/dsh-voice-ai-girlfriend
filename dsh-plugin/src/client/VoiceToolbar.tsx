@@ -45,7 +45,16 @@ export const VoiceToolbar = memo(function VoiceToolbar(props: VoiceToolbarProps)
   const bridgeProps = props as unknown as React.ComponentProps<typeof BridgeStatus>
   const personaProps = props as unknown as React.ComponentProps<typeof PersonaToggle>
   return (
-    <div className={css.toolbar}>
+    <div
+      style={{
+        display: 'block',
+        textAlign: 'center',
+        width: '100%',
+        boxSizing: 'border-box',
+        padding: '8px 12px',
+        margin: '0 auto',
+      }}
+    >
       <BridgeStatus {...bridgeProps} />
       <PersonaToggle {...personaProps} />
       <MicButton {...micProps} />

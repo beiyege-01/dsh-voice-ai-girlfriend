@@ -11,7 +11,7 @@ import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots
 // Type-only: pulls ui-conversation's SlotMap merge for PropsRuntime resolution.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { VoiceInjected } from './contract.ts'
-import css from './VoiceToggle.module.css'
+import { chipStyle, chipKey } from './chip.ts'
 
 const VOICE_ENABLED_KEY = 's2s.voice.enabled'
 
@@ -52,9 +52,6 @@ export const VoiceToggle = memo(function VoiceToggle({ t, speaker, abortTts }: V
         // persistence unavailable — state still flips for this session
       }
       if (!next) {
-        // Turning the reading OFF: interrupt any reply currently being read
-        // AND abort the in-flight TTS request so the bridge stops
-        // synthesizing instead of draining its queue.
         speaker.stop()
         abortTts()
       }
@@ -63,15 +60,17 @@ export const VoiceToggle = memo(function VoiceToggle({ t, speaker, abortTts }: V
   }, [speaker, abortTts])
 
   return (
-    <button
-      type="button"
-      className={on ? css.speakerOn : css.speakerOff}
+    <span
+      role="button"
+      tabIndex={0}
       title={on ? t('toggle.offHint') : t('toggle.onHint')}
       aria-label={on ? t('toggle.offHint') : t('toggle.onHint')}
       aria-pressed={on}
+      style={chipStyle(on)}
       onClick={toggle}
+      onKeyDown={chipKey}
     >
       <SpeakerIcon />
-    </button>
+    </span>
   )
 })

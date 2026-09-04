@@ -1,20 +1,14 @@
 /**
  * DigitalHumanToggle: composer tool-row switch for the digital-human (DUIX)
- * talking-head replies.
- *
- * ON (default): replies are NOT spoken sentence-by-sentence; the bridge
- * renders a lip-synced video (TTS audio embedded) and the companion window
- * plays video + voice together when it is ready.
- * OFF: digital-human generation is skipped entirely; replies fall back to the
- * near-instant sentence TTS playback.
- * Persisted in localStorage `s2s.voice.digitalHuman` ('1'/'0', default on).
+ * talking-head replies. ON (default): replies go to the bridge's video
+ * pipeline; OFF: fall back to near-instant sentence TTS.
  */
 import { memo, useCallback, useState } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pulls ui-conversation's SlotMap merge for PropsRuntime resolution.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { VoiceInjected } from './contract.ts'
-import css from './DigitalHumanToggle.module.css'
+import { chipStyle, chipKey } from './chip.ts'
 
 const DIGITAL_HUMAN_KEY = 's2s.voice.digitalHuman'
 
@@ -41,9 +35,6 @@ function DigitalHumanIcon() {
   )
 }
 
-/**
- * @param props - framework runtime + locale seats.
- */
 export const DigitalHumanToggle = memo(function DigitalHumanToggle({ t }: DigitalHumanToggleProps) {
   const [on, setOn] = useState<boolean>(readDigitalHuman)
 
@@ -60,15 +51,17 @@ export const DigitalHumanToggle = memo(function DigitalHumanToggle({ t }: Digita
   }, [])
 
   return (
-    <button
-      type="button"
-      className={on ? css.bubbleOn : css.bubbleOff}
+    <span
+      role="button"
+      tabIndex={0}
       title={on ? t('dh.offHint') : t('dh.onHint')}
       aria-label={on ? t('dh.offHint') : t('dh.onHint')}
       aria-pressed={on}
+      style={chipStyle(on)}
       onClick={toggle}
+      onKeyDown={chipKey}
     >
       <DigitalHumanIcon />
-    </button>
+    </span>
   )
 })

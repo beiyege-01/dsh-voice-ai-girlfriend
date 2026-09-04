@@ -4,19 +4,14 @@
  *
  *  - ON  (default, `s2s.voice.interrupt` = '1'): 插话模式 — the sentence
  *    steers the running turn (interrupts it) and is answered immediately.
- *  - OFF (`s2s.voice.interrupt` = '0'): 排队模式 — the sentence is queued and
- *    auto-sends once the current turn finishes (continuous conversation; the
- *    running reply is never yanked mid-generation).
- *
- * The mic barge-in (stopping playback when the user starts speaking, an echo
- * guard) applies in both modes; this switch only picks the delivery mode.
+ *  - OFF (`s2s.voice.interrupt` = '0'): 排队模式 — the sentence is queued.
  */
 import { memo, useCallback, useState } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pulls ui-conversation's SlotMap merge for PropsRuntime resolution.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { VoiceInjected } from './contract.ts'
-import css from './BusyToggle.module.css'
+import { chipStyle, chipKey } from './chip.ts'
 
 const INTERRUPT_KEY = 's2s.voice.interrupt'
 
@@ -40,9 +35,6 @@ function BoltIcon() {
   )
 }
 
-/**
- * @param props - framework runtime + locale + injected sendText (delivery mode).
- */
 export const BusyToggle = memo(function BusyToggle({ t }: BusyToggleProps) {
   const [on, setOn] = useState<boolean>(readInterrupt)
 
@@ -59,15 +51,17 @@ export const BusyToggle = memo(function BusyToggle({ t }: BusyToggleProps) {
   }, [])
 
   return (
-    <button
-      type="button"
-      className={on ? css.boltOn : css.boltOff}
+    <span
+      role="button"
+      tabIndex={0}
       title={on ? t('interrupt.onHint') : t('interrupt.offHint')}
       aria-label={on ? t('interrupt.onHint') : t('interrupt.offHint')}
       aria-pressed={on}
+      style={chipStyle(on)}
       onClick={toggle}
+      onKeyDown={chipKey}
     >
       <BoltIcon />
-    </button>
+    </span>
   )
 })

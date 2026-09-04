@@ -167,16 +167,43 @@ export const MicButton = memo(function MicButton({ t, sendText, speaker, interru
     phase === 'listening' && voiceActive ? css.voice : '',
   ].filter(Boolean).join(' ')
 
+  const phaseColor =
+    phase === 'error'
+      ? 'var(--dsw-alias-state-error-primary)'
+      : phase === 'transcribing'
+        ? 'var(--dsw-alias-state-success-primary)'
+        : phase === 'listening'
+          ? (voiceActive ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-business-primary)')
+          : 'var(--dsw-alias-label-dimmed)'
+
   return (
-    <button
-      type="button"
+    <span
+      role="button"
+      tabIndex={0}
       className={className}
       title={`${t('mic.title')} · ${statusTitle}`}
       aria-label={`${t('mic.title')} · ${statusTitle}`}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 30,
+        height: 30,
+        padding: 0,
+        border: 'none',
+        borderRadius: 9,
+        cursor: 'pointer',
+        position: 'relative',
+        background: 'rgba(127,127,127,0.14)',
+        color: phaseColor,
+        boxShadow: 'inset 0 0 0 1px rgba(127,127,127,0.18)',
+        transition: 'color 0.2s ease, background 0.2s ease',
+      }}
       onClick={toggle}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
     >
       <MicIcon />
       <span className={css.waves} aria-hidden="true"><i /><i /><i /></span>
-    </button>
+    </span>
   )
 })
