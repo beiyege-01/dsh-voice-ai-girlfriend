@@ -80,7 +80,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File bridge\start-full-stack.ps1 
 | 数字人 | DUIX `guiji2025/duix.avatar-5090:trt10.9`（宿主 `:9000`，冷启动 1-3 分钟） |
 | Docker | Docker Desktop 29.x（DUIX 容器随「数字人开关」`docker start/stop`） |
 
-**v0.4.0（DSH 0.2.1 适配）**：2026-10-25 在 `dsh 0.2.1-rc.2`（profile `web-v021`，`:3092`）实测通过——插件加载、工具行/女友窗渲染、`useChat` 的 `assistant-step` 读取、回复触发 `/api/tts` 与 `/api/dh/speak`、余额 pill 全部正常。0.2.x 的 Web 插件系统（`__ModuleLoader__` 闭包、`<style data-plugin-css>`、`conversation.input.dock` / `input.left` / `composer.dock` 槽位、`sessions.prompt`）与 0.1.3 保持同一套契约，业务代码无需改动；余额徽章从「依赖本地 harness 的 stats-extras 补丁」改为**真正的 composer stats pill**（官方 0.2.x 可直接显示，点击刷新）；`package.json` 增加 `engines.dsh` 兼容范围，供新版插件管理器检查。
+**v0.4.0（DSH 0.2.1 适配）**：2026-10-25 在 `dsh 0.2.1-rc.2`（profile `web-v021`，`:3092`）实测通过——插件加载、工具行/女友窗渲染、`useChat` 的 `assistant-step` 读取、回复触发 `/api/tts` 与 `/api/dh/speak`、**数字人端到端出片（1/1 段，女友窗视频实际播放）**、余额 pill 全部正常。0.2.x 的 Web 插件系统（`__ModuleLoader__` 闭包、`<style data-plugin-css>`、`conversation.input.dock` / `input.left` / `composer.dock` 槽位、`sessions.prompt`）与 0.1.3 保持同一套契约，业务代码无需改动；余额徽章从「依赖本地 harness 的 stats-extras 补丁」改为**真正的 composer stats pill**（官方 0.2.x 可直接显示，点击刷新）；`package.json` 增加 `engines.dsh` 兼容范围，供新版插件管理器检查。
 
 本轮桥接侧新增（v0.3.0 配套）：`POST /api/dh/enable` **运行时开关**（关掉＝清队列、停预热、零 DUIX 流量，并可联动 `docker stop` 释放显存；打开＝`docker start` + 就绪后预热）、轮转日志 `logs/bridge.log`、`/api/dh/status` 附带 `duix` 容器状态与 `stats` 计数（`submits` / `segment_submits` / `status_polls`，用于核对「任务到底提交了没有」）。
 

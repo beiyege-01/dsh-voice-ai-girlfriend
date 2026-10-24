@@ -75,5 +75,6 @@ node build.mjs   # 产物 lib/client.js（browser bundle）+ lib/index.js（服�
 - 插件入口出现在 `window.__DSH_BOOT__` 的 application batch，`/plugins/??<pkg>/client.js` 返回 200。
 - 浏览器控制台出现 `[ui-voice] loaded, bridge = http://127.0.0.1:8765`，无插件异常。
 - 工具行 8 个控件（音色 / 形象 / 待机 / 麦克风 / 朗读 / 数字人 / QQ / 女友窗 / 插话）全部渲染。
-- 发送一条真实消息：`assistant-step` 文本被回复监听器读到，桥接收到 `POST /api/dh/speak`（数字人提交）与 `POST /api/tts`（失败的 TTS 是因为测试机 OmniVoice 未启动，并非插件问题）。
+- 发送一条真实消息：`assistant-step` 文本被回复监听器读到，桥接收到 `POST /api/dh/speak`（数字人提交）与 `POST /api/tts`。
+- **数字人端到端**（2026-10-25 补测，Docker + OmniVoice 就绪时）：短回复生成 `1/1 段`，`/media/dh/<code>-s0-r.mp4` 时长 14.56s、1024×1024，女友窗视频 `paused=false`、`opacity=1` 正常播放。
 - composer 底部统计行显示 `余额 ¥128.66`。

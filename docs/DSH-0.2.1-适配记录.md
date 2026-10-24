@@ -8,6 +8,7 @@
 - 浏览器控制台只有 `[ui-voice] loaded, bridge = http://127.0.0.1:8765`，无插件异常；
 - 工具行渲染出 8 个控件（音色 / 形象 / 待机 / 麦克风 / 朗读 / 数字人 / QQ / 女友窗 / 插话）；
 - 发送真实消息后，`useChat` 的 `assistant-step` 文本被回复监听器读取，桥接收到 `POST /api/dh/speak` 与 `POST /api/tts`；
+- **数字人端到端**（Docker + OmniVoice 就绪）：`/api/dh/status` → `state=done`、`total_segments=1`、`done_segments=1`、`video_url=/media/dh/<code>-s0-r.mp4`；女友窗 `<video>` 的 `currentSrc` 指向该 URL，`paused=false`、`opacity=1`、`duration=14.56`、`1024×1024`，实际播放；
 - composer 底部统计行显示 `余额 ¥128.66`。
 
 ## 为什么业务代码基本不用改
