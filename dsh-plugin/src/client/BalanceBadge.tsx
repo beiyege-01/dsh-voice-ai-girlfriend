@@ -1,33 +1,26 @@
 /**
- * BalanceBadge (stats-line variant): no longer renders its own row — it feeds
- * the DeepSeek balance into the composer stats line as an extra group (e.g.
- * "3 轮 · 5 步 · 工具 2.1s · ¥45.10"). The row elides when overlong and the
- * hover tooltip reveals the full line.
+ * BalanceBadge (composer stats pill): shows the DeepSeek API balance in the
+ * composer's bottom stats row.
+ *
+ * dsh 0.2.x renders `conversation.composer.dock` as the official stats pill
+ * row (activity / usage / …), so this entry renders its own compact pill
+ * instead of feeding a harness-side stats-extras registry. That registry was a
+ * local stats-line patch on the 0.1.3-era checkout; the official 0.2.x tree
+ * has no such seam, which made the old "renders null + window global" version
+ * invisible. A real pill works on every official build, needs no harness
+ * patch, and is click-to-refresh.
  *
  * Cost: fetches /api/balance on mount, then every 10 minutes (the bridge
  * caches the upstream answer for 10 minutes, so the official API is hit at
- * most once per 10 minutes). Renders null.
+ * most once per 10 minutes).
  */
-import { memo, useEffect, useRef } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pulls ui-conversation's SlotMap merge for PropsRuntime resolution.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { VoiceInjected } from './contract.ts'
 import { bridgeBase } from './bridge.ts'
-
-/**
- * Stats-row extra registry — convention-based window global shared with
- * ui-conversation's stats-extras.ts (cross-plugin value imports are forbidden,
- * so both sides address the same key without importing each other).
- */
-type StatsExtra = () => string | null
-interface WindowWithExtras {
-  __dshStatsExtras?: Set<StatsExtra>
-}
-function statsRegistry(): Set<StatsExtra> {
-  const win = window as WindowWithExtras
-  return win.__dshStatsExtras ??= new Set<StatsExtra>()
-}
+import css from './BalanceBadge.module.css'
 
 interface BalanceInfo {
   currency: string
@@ -58,36 +51,50 @@ export type BalanceBadgeProps =
   PropsRuntime<'conversation.composer.dock'> & PropsLocale<'voice'> & VoiceInjected
 
 /**
- * @param props - framework runtime + locale seats (renders nothing).
+ * @param props - framework runtime + locale seats.
  */
 export const BalanceBadge = memo(function BalanceBadge(_props: BalanceBadgeProps) {
-  const labelRef = useRef<string | null>(null)
+  const [label, setLabel] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const aliveRef = useRef(true)
 
-  useEffect(() => {
-    let cancelled = false
-    const load = async () => {
-      try {
-        const resp = await fetch(`${bridgeBase()}/api/balance`)
-        if (!resp.ok) return
-        const json = (await resp.json()) as BalanceResp
-        if (!cancelled) labelRef.current = formatBalance(json)
-      } catch {
-        // keep the previous value; retry on the next tick
-      }
-    }
-    void load()
-    const timer = window.setInterval(load, REFRESH_MS)
-    const extra: StatsExtra = () => {
-      const value = labelRef.current
-      return value === null ? null : `余额 ${value}`
-    }
-    statsRegistry().add(extra)
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-      statsRegistry().delete(extra)
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const resp = await fetch(`${bridgeBase()}/api/balance`)
+      if (!resp.ok) return
+      const json = (await resp.json()) as BalanceResp
+      if (aliveRef.current) setLabel(formatBalance(json))
+    } catch {
+      // Bridge offline: keep the previous value; the next tick retries.
+    } finally {
+      if (aliveRef.current) setLoading(false)
     }
   }, [])
 
-  return null
+  useEffect(() => {
+    aliveRef.current = true
+    void load()
+    const timer = window.setInterval(() => { void load() }, REFRESH_MS)
+    return () => {
+      aliveRef.current = false
+      window.clearInterval(timer)
+    }
+  }, [load])
+
+  // Nothing to show before the first successful fetch; stay out of the row.
+  if (label === null) return null
+
+  return (
+    <button
+      type="button"
+      className={css.chip}
+      title={`DeepSeek 余额 ${label}（点击刷新）`}
+      aria-label={`DeepSeek 余额 ${label}，点击刷新`}
+      onClick={() => { void load() }}
+      disabled={loading}
+    >
+      余额 {label}
+    </button>
+  )
 })

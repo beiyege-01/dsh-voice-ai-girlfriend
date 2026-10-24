@@ -1,71 +1,47 @@
 {
-  "name": "@deepseek-ai/dsh-client-ui-voice",
-  "description": "DSH voice chat: mic capture -> bridge STT -> conversation.send; reply TTS playback; companion animation window",
-  "version": "0.3.0",
-  "publishConfig": {
-    "access": "public"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/deepseek-ai/deepseek-harness.git",
-    "directory": "packages/client/ui-voice"
-  },
+  "name": "@beiyege-01/dsh-voice-ai-girlfriend",
+  "version": "0.4.0",
+  "description": "Voice AI girlfriend for DeepSeek Harness 0.2.x: FunASR mic input, OmniVoice TTS replies, companion animation window, QQ two-way chat. Needs the repo's voice bridge + NapCat.",
   "type": "module",
+  "engines": {
+    "dsh": ">=0.1.3-alpha.1 <0.3.0"
+  },
   "main": "lib/index.js",
-  "types": "lib/types/index.d.ts",
   "exports": {
-    ".": {
-      "types": "./lib/types/index.d.ts",
-      "default": "./lib/index.js"
-    },
-    "./invariant": {
-      "types": "./lib/types/invariant.d.ts",
-      "default": "./lib/invariant.js"
-    },
-    "./client": {
-      "types": "./lib/types/client/index.d.ts",
-      "default": "./lib/client.js"
-    },
-    "./src/*": "./src/*",
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
+      "platform": "web",
       "inject": [
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-conversation"
-      ],
-      "platform": "web"
+      ]
     }
   },
   "scripts": {
-    "bundle": "tsdown",
-    "watch": "tsdown --watch"
-  },
-  "license": "MIT",
-  "dependencies": {
-    "@deepseek-ai/dsh-client-runtime": "workspace:^",
-    "@deepseek-ai/dsh-client-ui-conversation": "workspace:^",
-    "@deepseek-ai/dsh-client-ui-slots": "workspace:^",
-    "clsx": "^2.0.0",
-    "react": "^18.2.0"
-  },
-  "peerDependencies": {
-    "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-client-locale": "workspace:^",
-    "@deepseek-ai/dsh-invariants": "workspace:^"
-  },
-  "devDependencies": {
-    "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-client-locale": "workspace:^",
-    "@deepseek-ai/dsh-invariants": "workspace:^",
-    "@types/react": "~18.3.1"
+    "build": "node build.mjs",
+    "prepare": "node build.mjs"
   },
   "files": [
-    "lib/index.js",
-    "lib/invariant.js",
-    "lib/client.js",
-    "lib/types/**/*.d.ts"
-  ]
+    "lib/",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.0.0",
+    "@types/react": "~18.3.1"
+  },
+  "license": "MIT"
 }

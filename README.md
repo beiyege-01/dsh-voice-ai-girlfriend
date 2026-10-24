@@ -23,7 +23,7 @@
 
 ```
 ┌────────────────────────────────────────────┐
-│  浏览器（DSH Web GUI :3080）                 │
+│  浏览器（DSH Web GUI :3092）                 │
 │  ┌──────────┐  ┌─────────────────────────┐  │
 │  │ 对话面板   │  │ 女友窗（bg/task 视频）   │  │
 │  │ 麦克风+⚡  │  │ 数字人视频（同步播放）    │  │
@@ -57,31 +57,34 @@
 | 1/6 | 检查 Docker 引擎与 DUIX 容器；容器没起就 `docker start` 并等 `:9000` 应答 | 已在运行则跳过 |
 | 2/6 | 调用 `start-omnivoice-wsl.ps1`：起 WSL2 OmniVoice（`:9877`）+ 同步 bridge-config 的 IP + 拉起桥接（`:8765`） | 已在运行则跳过 |
 | 3/6 | 桥接保险：没起来就启动；缺 `DEEPSEEK_API_KEY` 时自动重启修复（余额徽章不再 503） | 幂等 |
-| 4/6 | 启动 DSH Web（默认新版 `0.1.3-alpha.1` / profile `web-v013`，`:3080`）并打开带 token 的链接 | 3080 已在服务则绝不打断现有会话 |
+| 4/6 | 启动 DSH Web（默认最新 `0.2.1-rc.2` / profile `web-v021`，`:3092`）并打开带 token 的链接 | 该端口已在服务则绝不打断现有会话 |
 | 5/6 | 数字人状态：开关 / 容器 / 段进度 / `submits`、`segment_submits` 计数 | 只读 |
 | 6/6 | 汇总自检表：每条链路 OK / FAIL | 只读 |
 
-参数：`-NoDsh`（只起语音栈）、`-Rc8`（改用旧版 rc.8 / profile `web`）、`-NoBrowser`、`-WithQQ`（额外拉起 NapCat）、`-SkipDockerCheck`。
+参数：`-NoDsh`（只起语音栈）、`-V013`（改用 dsh 0.1.3 / profile `web-v013` / `:3080`）、`-Rc8`（旧版 rc.8 / profile `web`）、`-Port <端口>`、`-Harness <路径>`、`-Profile <名字>`、`-NoBrowser`、`-WithQQ`（额外拉起 NapCat）、`-SkipDockerCheck`。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File bridge\start-full-stack.ps1 -NoBrowser
 ```
 
-## 版本适配与维护节奏（2026-09-14）
+## 版本适配与维护节奏（2026-10-25）
 
 | 组件 | 适配版本 |
 |---|---|
-| **DSH（主用）** | `dsh 0.1.3-alpha.1` / profile `web-v013`（`:3080`，桌面脚本「启动新版DSH-v013」） |
-| **DSH（兼容）** | `rc.8`（`E:\DSH\deepseek-harness` master `141eb6fef`）/ profile `web` |
-| 插件 | `@beiyege-01/dsh-voice-ai-girlfriend` **v0.3.0**（独立包仓库同步；`node build.mjs` 构建） |
+| **DSH（主用）** | `dsh 0.2.1-rc.2` / profile `web-v021`（`:3092`） |
+| **DSH（兼容）** | `dsh 0.1.3-alpha.1` / profile `web-v013`（`:3080`） |
+| **DSH（旧版）** | `rc.8` / profile `web`（用插件 `v0.3.0`） |
+| 插件 | `@beiyege-01/dsh-voice-ai-girlfriend` **v0.4.0**（独立包仓库同步；`node build.mjs` 构建） |
 | 桥接 | `bridge/voice_bridge.py`（FastAPI/uvicorn `:8765`，Python 3.14 venv） |
 | TTS 引擎 | OmniVoice（WSL2 + FlashInfer，`:9877`） |
 | 数字人 | DUIX `guiji2025/duix.avatar-5090:trt10.9`（宿主 `:9000`，冷启动 1-3 分钟） |
 | Docker | Docker Desktop 29.x（DUIX 容器随「数字人开关」`docker start/stop`） |
 
+**v0.4.0（DSH 0.2.1 适配）**：2026-10-25 在 `dsh 0.2.1-rc.2`（profile `web-v021`，`:3092`）实测通过——插件加载、工具行/女友窗渲染、`useChat` 的 `assistant-step` 读取、回复触发 `/api/tts` 与 `/api/dh/speak`、余额 pill 全部正常。0.2.x 的 Web 插件系统（`__ModuleLoader__` 闭包、`<style data-plugin-css>`、`conversation.input.dock` / `input.left` / `composer.dock` 槽位、`sessions.prompt`）与 0.1.3 保持同一套契约，业务代码无需改动；余额徽章从「依赖本地 harness 的 stats-extras 补丁」改为**真正的 composer stats pill**（官方 0.2.x 可直接显示，点击刷新）；`package.json` 增加 `engines.dsh` 兼容范围，供新版插件管理器检查。
+
 本轮桥接侧新增（v0.3.0 配套）：`POST /api/dh/enable` **运行时开关**（关掉＝清队列、停预热、零 DUIX 流量，并可联动 `docker stop` 释放显存；打开＝`docker start` + 就绪后预热）、轮转日志 `logs/bridge.log`、`/api/dh/status` 附带 `duix` 容器状态与 `stats` 计数（`submits` / `segment_submits` / `status_polls`，用于核对「任务到底提交了没有」）。
 
-⏳ **维护节奏：作者本月正在筹备婚礼，DSH 新版本的适配与兼容性跟进顺延到国庆之后（10 月上旬）。** 这段时间欢迎继续提 issue / PR，但响应可能会慢一些；上表所列版本功能完整、可正常使用。
+✅ **维护节奏：DSH 0.2.x 适配已恢复跟进（2026-10）。** 欢迎提 issue / PR；主仓库与插件仓库同步更新。
 
 ## 目录结构
 
@@ -168,7 +171,7 @@ npm install -g pnpm
 
 ### 6. 准备 deepseek-harness（DSH）源码
 
-DSH 是开源项目，本项目是它的一个插件。**需要先有一份 DSH 源码树**（插件要装进它的源码里）：
+DSH 是开源项目，本项目是它的一个插件。**需要先有一份 DSH 源码树 / 可用的 `dsh` CLI**（0.2.1 起插件用 `dsh plugin` 独立安装，不必复制进源码树）：
 
 ```powershell
 git clone https://github.com/deepseek-ai/deepseek-harness.git
@@ -176,7 +179,13 @@ cd deepseek-harness
 pnpm install
 ```
 
-> ✅ **已适配 DSH rc.8 与 dsh 0.1.3**：插件协议（`dsh.bundle` manifest + `conversation.input.dock/left` 槽位）按 rc.8 实现，升级 rc.8 无需改动即可运行；**2026-09-05 已在 dsh v0.1.3-alpha.1 实测通过**（0.1.3 槽位/`__ModuleLoader__`/session prompt 契约均未变，零代码改动）。推荐安装（rc.8 与 0.1.3 通用）：`dsh plugin --profile web add github:beiyege-01/dsh-voice-ai-girlfriend-plugin`。余额统计走 `conversation.composer.dock` 槽位。
+> ✅ **已适配 DSH 0.2.1（2026-10-25 实测）**：插件走官方 Web 插件系统（`dsh.bundle` manifest + `dsh.client` 浏览器入口 + `conversation.input.dock/left/composer.dock` 槽位），在 `dsh 0.2.1-rc.2` 上已实测加载、渲染、回复朗读/数字人提交、余额 pill 全链路。推荐安装命令（把 `<profile>` 换成你的 profile，0.2.x 常用 `web-v021`）：
+>
+> ```bash
+> dsh plugin --profile <profile> add github:beiyege-01/dsh-voice-ai-girlfriend-plugin
+> ```
+>
+> 余额显示走 `conversation.composer.dock` 的原生 stats pill，**不再需要给 harness 打 stats-extras 补丁**。0.1.3 用户请用 `-V013` 启动（profile `web-v013`，`:3080`）；rc.8 用户请安装插件 `v0.3.0`（`v0.4.0` 的 `engines.dsh` 从 `0.1.3-alpha.1` 起）。
 > `pnpm install` 会装几十秒到几分钟。装完后这个文件夹先放着，后面"安装 DSH 语音插件"步骤要用。
 > 记住它的路径（比如 `C:\dev\deepseek-harness`），后面一键启动要用。
 
@@ -358,7 +367,17 @@ venv-speech\Scripts\python.exe bridge\smoke_tts.py --text "你好，我是小雅
 
 ## 七、安装 DSH 语音插件
 
-桥接只是"声音的服务"，对话界面和麦克风按钮在 DSH 里，需要装插件。按 [`dsh-plugin/README.md`](dsh-plugin/README.md) 的步骤操作（把 `dsh-plugin\` 整个复制进你的 deepseek-harness 源码树，注册三处、构建、重启）。
+桥接只是"声音的服务"，对话界面和麦克风按钮在 DSH 里，需要装插件。**推荐的独立安装方式**（不必改动 harness 源码）：
+
+```powershell
+dsh plugin --profile <profile> add github:beiyege-01/dsh-voice-ai-girlfriend-plugin
+```
+
+> 0.2.1 起 `--profile` 必须写在 `add` 之前；`<profile>` 换成你的 profile 名（0.2.x 常用 `web-v021`）。
+> pnpm ≥10 对 git 依赖的构建脚本有 allowBuilds 限制：按安装时 pnpm 打印的提示，在 profile 的 `pnpm-workspace.yaml` 的 `allowBuilds` 里加一行允许 `esbuild` 后重跑。
+> 安装后重启该 profile 的 dsh，浏览器刷新即可看到输入框上方的语音工具行。
+
+想改代码/自行构建：`dsh-plugin/` 是本仓库内的插件源码镜像，构建见 [`dsh-plugin/README.md`](dsh-plugin/README.md)。
 
 ## 八、流式数字人：回复出镜对口型（可选增强）
 
@@ -410,7 +429,7 @@ set NAPCAT_DIR=D:\QQ\NapCat\napcat   rem 可选：NapCat 安装目录（默认�
 bridge\start-all.cmd
 ```
 
-> - `DSH_HARNESS` 指向你第一步准备的那份 DSH 源码树（第六部分安装过插件的那个）。
+> - `DSH_HARNESS` 指向第一步准备的那份 DSH 源码树；脚本默认用 `DSH_PROFILE=web-v021`、`DSH_PORT=3092`，0.1.3 请 `set DSH_PROFILE=web-v013` 和 `set DSH_PORT=3080`，rc.8 用 `web`。
 > - `start-all.cmd` 会自动：起桥接 → 起 NapCatQQ（**会关闭所有运行中的 QQ 进程**再注入小号）→ 起 DSH Web → 开浏览器。
 > - 不想自动起 NapCat（比如你要在电脑上正常用主号 QQ）：`bridge\start-all.cmd nq`（跳过 NapCat，QQ 双向聊天不工作）。
 > - 只想单独起 NapCat：`bridge\start-napcat.cmd`（会等 OneBot :3000 就绪，失败时提示去 WebUI 检查）。

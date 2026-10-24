@@ -1,18 +1,21 @@
-# ============================================================================
-#  DSH 语音全栈 · 一键启动（2026-09-14）
+﻿# ============================================================================
+#  DSH 语音全栈 · 一键启动（2026-10-25 更新：DSH 0.2.1）
 #
 #  一条命令把「重启电脑后需要点好几下」的东西按正确顺序拉起来：
 #    [1] Docker / DUIX 数字人容器检查（Docker Desktop 需你提前手动开好）
 #    [2] WSL2 OmniVoice TTS（:9877）+ 语音桥接（:8765）—— 复用 start-omnivoice-wsl.ps1
 #    [3] 桥接保险：没起来就用带 DEEPSEEK_API_KEY 的方式起；缺 key 时自动重启修复
-#    [4] DSH Web（默认新版 v013 / profile web-v013，:3080）+ 自动用带 token 的链接开浏览器
+#    [4] DSH Web（默认最新 0.2.1 / profile web-v021，:3092）+ 自动用带 token 的链接开浏览器
 #    [5] 数字人状态检查（开关 / 容器 / 是否需要 docker start）
 #    [6] 汇总自检：每条链路 OK / FAIL 一目了然
 #
 #  用法：
-#    start-full-stack.cmd                # 双击即可（= 本脚本默认参数）
+#    start-full-stack.cmd                # 双击即可（自动选最新的 0.2.1；没有则退回 v013）
 #    start-full-stack.cmd -NoDsh         # 只起语音栈（OmniVoice + 桥接 + 数字人检查）
-#    start-full-stack.cmd -Rc8           # 用旧版 rc.8（profile web）而不是 v013
+#    start-full-stack.cmd -V013          # 用 dsh 0.1.3（profile web-v013，:3080）
+#    start-full-stack.cmd -Rc8           # 用旧版 rc.8（profile web，:3080）
+#    start-full-stack.cmd -Port 3092     # 指定 DSH 端口
+#    start-full-stack.cmd -Harness E:\DSH\deepseek-harness-v021 -Profile web-v021
 #    start-full-stack.cmd -NoBrowser     # 不自动开浏览器
 #    start-full-stack.cmd -WithQQ        # 额外拉起 NapCat（QQ 双向推送）
 #
@@ -22,8 +25,12 @@ param(
     [switch]$NoDsh,
     [switch]$NoBrowser,
     [switch]$Rc8,
+    [switch]$V013,
     [switch]$WithQQ,
-    [switch]$SkipDockerCheck
+    [switch]$SkipDockerCheck,
+    [int]$Port = 0,
+    [string]$Harness = '',
+    [string]$Profile = ''
 )
 
 $ErrorActionPreference = 'Continue'
@@ -40,15 +47,33 @@ $DuiXProbe     = 'http://127.0.0.1:9000/easy/query?code=probe'
 $BridgeHealth  = 'http://127.0.0.1:8765/api/health'
 $BridgeStatus  = 'http://127.0.0.1:8765/api/dh/status'
 $BridgeBalance = 'http://127.0.0.1:8765/api/balance'
-$DshPort       = 3080
-# 新版（v013）与旧版（rc.8）harness 位置；-Rc8 时互换
+
+# 选 harness / profile / 端口：显式参数 > -Rc8/-V013 > 自动挑最新的 0.2.1 > v013。
+$LatestHarness = 'E:\DSH\deepseek-harness-v021'
+$LatestProfile = 'web-v021'
+$LatestPort    = 3092
+$LegacyHarness = 'E:\DSH\deepseek-harness-v013'
+$LegacyProfile = 'web-v013'
+$LegacyPort    = 3080
+$Rc8Harness    = 'E:\DSH\deepseek-harness'
+$Rc8Profile    = 'web'
+$Rc8Port       = 3080
+
 if ($Rc8) {
-    $Harness = 'E:\DSH\deepseek-harness'
-    $Profile = 'web'
+    $SelectedHarness = $Rc8Harness; $SelectedProfile = $Rc8Profile; $SelectedPort = $Rc8Port
+} elseif ($V013) {
+    $SelectedHarness = $LegacyHarness; $SelectedProfile = $LegacyProfile; $SelectedPort = $LegacyPort
+} elseif (Test-Path (Join-Path $LatestHarness 'package.json')) {
+    $SelectedHarness = $LatestHarness; $SelectedProfile = $LatestProfile; $SelectedPort = $LatestPort
 } else {
-    $Harness = 'E:\DSH\deepseek-harness-v013'
-    $Profile = 'web-v013'
+    $SelectedHarness = $LegacyHarness; $SelectedProfile = $LegacyProfile; $SelectedPort = $LegacyPort
 }
+if ($Harness -ne '') { $SelectedHarness = $Harness }
+if ($Profile -ne '') { $SelectedProfile = $Profile }
+if ($Port -gt 0) { $SelectedPort = $Port }
+$Harness = $SelectedHarness
+$Profile = $SelectedProfile
+$DshPort = $SelectedPort
 $Result = [ordered]@{}
 
 function Say([string]$text, [string]$color = 'Gray') { Write-Host $text -ForegroundColor $color }
@@ -207,7 +232,7 @@ if ($NoDsh) {
     Warn '按参数 -NoDsh 跳过'
     $Result['DSH Web'] = 'SKIP'
 } elseif (Test-Port '127.0.0.1' $DshPort) {
-    Ok "3080 已在服务（不重复启动，也不会打断当前会话）"
+    Ok "$DshPort 已在服务（不重复启动，也不会打断当前会话）"
     Say "      直接用现有浏览器标签即可：$dshUrl" 'DarkGray'
     $Result['DSH Web'] = 'OK (已在运行)'
 } elseif (-not (Test-Path (Join-Path $Harness 'package.json'))) {
@@ -222,7 +247,7 @@ if ($NoDsh) {
     $log = Join-Path $Harness "dsh-web-$Profile.log"
     if (Test-Path $log) { Remove-Item $log -Force -ErrorAction SilentlyContinue }
     Say "      启动中（首次约 10-40 秒）..."
-    $cmd = "cd /d `"$Harness`" && set OPENAI_BASE_URL=https://apihub.agnes-ai.com/v1 && set OPENAI_API_KEY= && call `"$pnpm`" dsh --profile $Profile --no-open >> `"$log`" 2>&1"
+    $cmd = "cd /d `"$Harness`" && set OPENAI_BASE_URL=https://apihub.agnes-ai.com/v1 && set OPENAI_API_KEY= && call `"$pnpm`" dsh --profile $Profile --port $DshPort --no-open >> `"$log`" 2>&1"
     Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', $cmd -WindowStyle Minimized
     $up = $false
     for ($i = 0; $i -lt 90; $i++) {
@@ -243,7 +268,7 @@ if ($NoDsh) {
             Say '      已打开浏览器（带 token 的登录链接）' 'DarkGray'
         }
     } else {
-        Bad '3080 90 秒内没应答，日志末尾：'
+        Bad "$DshPort 90 秒内没应答，日志末尾："
         if (Test-Path $log) { Get-Content -LiteralPath $log -Tail 15 | ForEach-Object { Say "      $_" 'DarkGray' } }
         $Result['DSH Web'] = 'FAIL'
     }

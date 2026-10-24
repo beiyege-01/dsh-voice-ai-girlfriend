@@ -1,0 +1,4 @@
+# voice-ai-girlfriend bundle: browser voice UI (mic + TTS + companion + QQ bridge).
+- insert:
+    - id: voice-ai-girlfriend
+      name: '@beiyege-01/dsh-voice-ai-girlfriend'

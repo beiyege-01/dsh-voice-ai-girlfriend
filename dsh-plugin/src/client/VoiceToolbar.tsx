@@ -23,7 +23,6 @@ import { CompanionToggle } from './CompanionToggle.tsx'
 import { BusyToggle } from './BusyToggle.tsx'
 import { BridgeStatus } from './BridgeStatus.tsx'
 import { PersonaToggle } from './PersonaToggle.tsx'
-import css from './VoiceToolbar.module.css'
 
 /** Full props: composer.dock runtime share + `voice` locale seat + injected face. */
 export type VoiceToolbarProps =
