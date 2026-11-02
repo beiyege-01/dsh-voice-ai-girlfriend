@@ -1149,6 +1149,8 @@ async def _dh_run(item: dict) -> None:
             pending_synth: asyncio.Task | None = None
             for i, seg_text in enumerate(segments):
                 if code in _dh_discarded:
+                    if pending_synth is not None:
+                        pending_synth.cancel()
                     _dh_set(state="discarded", message="已取消（被打断）", progress=0, code=code, text=text, videos=[])
                     logger.info("DH %s: discarded before segment %d", code, i)
                     return
@@ -1162,6 +1164,8 @@ async def _dh_run(item: dict) -> None:
                         code=code, text=text, done_segments=i,
                     )
                     logger.info("DH %s: preempted by newer task at segment %d/%d", code, i, total)
+                    if pending_synth is not None:
+                        pending_synth.cancel()
                     return
                 _dh_set(
                     state="generating",
@@ -1169,9 +1173,13 @@ async def _dh_run(item: dict) -> None:
                     code=code, text=text, done_segments=i,
                     progress=round(i / total * 100),
                 )
-                # 当前段音频：优先用流水线预合成好的；否则现合成
+                # 当前段音频：优先用流水线预合成好的；预合成失败则回退现合成
                 if pending_synth is not None:
-                    wav_path = await pending_synth
+                    try:
+                        wav_path = await pending_synth
+                    except Exception:  # noqa: BLE001
+                        logger.exception("DH %s: preset synth failed at segment %d, synthesizing now", code, i)
+                        wav_path = await _dh_synth_segment(seg_text)
                     pending_synth = None
                 else:
                     wav_path = await _dh_synth_segment(seg_text)
@@ -1193,11 +1201,10 @@ async def _dh_run(item: dict) -> None:
                     videos = videos + [{"video_file": fname, "video_url": f"/media/dh/{fname}"}]
                     _dh_state["videos"] = videos
                 _dh_record_history(seg_code, fname, seg_text)
-                if next_synth is not None:
-                    try:
-                        await next_synth
-                    except Exception:  # noqa: BLE001
-                        logger.exception("DH %s: next synth failed", code)
+                # 下一段音频已在此段 DUIX 生成期间预合成：把任务递给下一轮直接
+                # 取用。此前这里 await 后把结果丢弃、pending_synth 永远为空，
+                # 下一轮只能对同一段重复合成（TTS 白跑一遍、流水线提速归零）。
+                pending_synth = next_synth
                 _dh_set(
                     state="generating",
                     message=f"数字人生成中 {i + 2}/{total}…",
