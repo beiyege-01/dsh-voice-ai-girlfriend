@@ -1,0 +1,8 @@
+
+# WSL / Linux 侧脚本必须是 LF，否则在 WSL 里执行会报
+#   /usr/bin/env: 'bash': No such file or directory
+*.sh    text eol=lf
+*.py    text eol=lf
+*.ps1   text eol=crlf
+*.cmd   text eol=crlf
+*.md    text eol=lf

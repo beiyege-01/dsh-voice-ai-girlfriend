@@ -264,14 +264,34 @@ xcopy /E /I %USERPROFILE%\.cache\modelscope\models\iic--speech_paraformer-large_
 
 **部署前提**：Windows 11 + WSL2（Ubuntu 22.04）。WSL2 内用 uv 建环境：torch 2.13.0+cu130 + flashinfer 0.6.18 + jit-cache cu130 + nvcc cu13（Blackwell sm_120 必须 cu13 系列，cu129 会报「requires GPUs with sm75」）。**注意**：WSL2 系统里若有旧 nvcc（如 12.8）会干扰 flashinfer 的 CUDA 版本检测，启动服务前必须设置 `CUDA_HOME` 指向 cu13 的 nvcc 目录。
 
-**启动 OmniVoice 服务**（WSL2 内）：
+**服务脚本从哪来**（以前这一步坑过很多人）：
+
+`~/omnivoice-wsl/` 里需要两个文件 —— `demo_flashinfer.py`（把 OmniVoice 起成 `:9877` 的 HTTP 服务，并套 FlashInfer + CUDA Graph 加速、带合成缓存自动清理）和 `start_server.sh`。**仓库已自带**，在 `bridge/omnivoice/` 下，不用手抄：
 
 ```bash
-# 一键（含 CUDA_HOME 配置，模型复用 Windows 挂载 /mnt/e 的路径）
-wsl -d Ubuntu-22.04 -- bash ~/omnivoice-wsl/start_server.sh
+# 首次安装：从仓库拷进 WSL 家目录（Windows 盘挂载在 /mnt/，路径按实际改）
+wsl -d Ubuntu-22.04 -- bash -lc "mkdir -p ~/omnivoice-wsl && \
+  cp -f /mnt/d/speech-to-speech/release/dsh-voice-ai-girlfriend/bridge/omnivoice/demo_flashinfer.py \
+        /mnt/d/speech-to-speech/release/dsh-voice-ai-girlfriend/bridge/omnivoice/start_server.sh ~/omnivoice-wsl/ && \
+  chmod +x ~/omnivoice-wsl/start_server.sh"
 ```
 
-服务监听 `0.0.0.0:9877`，Windows 侧通过 **WSL2 的 IP**（`wsl hostname -I` 查询，重启后可能变化）访问，bridge-config 的 `omnivoice.base` 指向 `http://<WSL2-IP>:9877`。Windows 的 localhost 转发在本机 WSL2 网络模式下失效，必须用 IP。
+> 也可以直接跑 `bridge/start-omnivoice-wsl.ps1`：它检测到 `~/omnivoice-wsl/demo_flashinfer.py` 缺失时会**自动从仓库部署**，并把 `CUDA_HOME` / 模型路径都从 `$HOME` 推导（不再写死用户名）。
+
+**启动 OmniVoice 服务**（二选一）：
+
+```powershell
+# ① Windows 侧一键（推荐：检测 → 部署 → 启动 → 等就绪 → 同步配置 → 拉起 bridge）
+powershell -ExecutionPolicy Bypass -File bridge\start-omnivoice-wsl.ps1
+# 想用自己下载的模型：加 -Model /mnt/e/models/OmniVoice-bf16
+```
+
+```bash
+# ② WSL 内直接起（模型路径可用参数或 OMNIVOICE_MODEL 覆盖）
+wsl -d Ubuntu-22.04 -- bash ~/omnivoice-wsl/start_server.sh /mnt/e/llama-models/models/OmniVoice-bf16
+```
+
+服务监听 `0.0.0.0:9877`。访问地址优先用 **`127.0.0.1:9877`**（WSL2 localhost 转发，稳定）；该地址不通时再回退到 **WSL2 内网 IP**（`wsl hostname -I`，重启后可能变化）。启动脚本会自动探测哪个通，并把结果写进 `bridge-config.json` 的 `omnivoice.base`。
 
 **备选：Qwen3-TTS（无需 WSL2，降级方案）**：若不使用 WSL2，可在 `bridge-config.json` 里把 `tts` 相关配置切回 Qwen3-TTS-12Hz-1.7B-**Base**（仅 Base 支持参考音频克隆，VoiceDesign 不支持）。模型用 ModelScope 下载：
 
