@@ -291,7 +291,56 @@ powershell -ExecutionPolicy Bypass -File bridge\start-omnivoice-wsl.ps1
 wsl -d Ubuntu-22.04 -- bash ~/omnivoice-wsl/start_server.sh /mnt/e/llama-models/models/OmniVoice-bf16
 ```
 
-服务监听 `0.0.0.0:9877`。访问地址优先用 **`127.0.0.1:9877`**（WSL2 localhost 转发，稳定）；该地址不通时再回退到 **WSL2 内网 IP**（`wsl hostname -I`，重启后可能变化）。启动脚本会自动探测哪个通，并把结果写进 `bridge-config.json` 的 `omnivoice.base`。
+服务监听 `0.0.0.0:9877`。访问地址优先用 **`127.0.0.1:9877`**（WSL2 本机转发，稳定）；不通时脚本会自动回退到 **WSL2 内网 IP**（`wsl hostname -I`），并把能用的那个写进 `bridge-config.json` 的 `omnivoice.base`。
+
+#### 😵 第一次装？照这个顺序，别跳步
+
+> 这三步只需要做一次。全部是复制粘贴，不用改代码。
+
+**① 装 WSL2**（如果还没有）—— 管理员 PowerShell：
+
+```powershell
+wsl --install -d Ubuntu-22.04
+```
+
+装完**重启电脑**，开始菜单里会出现 Ubuntu。
+
+**② 在 Ubuntu 里建环境** —— 打开 Ubuntu 终端，粘这三段（约 10~20 分钟）：
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh && source ~/.bashrc
+mkdir -p ~/omnivoice-wsl && cd ~/omnivoice-wsl && uv venv --python 3.12 && source .venv/bin/activate
+uv pip install torch --index-url https://download.pytorch.org/whl/cu130
+uv pip install flashinfer-python flashinfer-jit-cache omnivoice
+```
+
+**③ 回 Windows 跑一键脚本** —— 在仓库目录下：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File bridge\start-omnivoice-wsl.ps1
+```
+
+它会自动：装服务脚本 → 起 OmniVoice → 等就绪 → 写配置 → 起语音桥。全程打印 `[OK]`，卡住也会告诉你怎么修。
+
+**怎么算成功**：浏览器打开 <http://127.0.0.1:9877/>，能看到带「语音克隆」字样的网页就是好了。
+
+> 📖 更细的图解 + 报错对照表：**[bridge/omnivoice/README.md](bridge/omnivoice/README.md)**
+> （常见报错：文件缺失、`bash\r`、显存不足、9877 被占用、模型下载慢——都写了怎么修）
+
+#### 关于模型（约 10GB）
+
+脚本按这个顺序找模型，**不用你手动改路径**：
+
+1. 命令行 `-Model /你的/路径`
+2. 环境变量 `OMNIVOICE_MODEL`
+3. 常见本地路径（`/mnt/e/llama-models/models/OmniVoice-bf16` 等）
+4. 以上都没有 → 自动从 HuggingFace 下载 `k2-fsa/OmniVoice`（**首次约 10GB**，10~60 分钟，只下一次）
+
+下载慢可以设镜像后再跑：
+
+```powershell
+$env:HF_ENDPOINT="https://hf-mirror.com"
+```
 
 **备选：Qwen3-TTS（无需 WSL2，降级方案）**：若不使用 WSL2，可在 `bridge-config.json` 里把 `tts` 相关配置切回 Qwen3-TTS-12Hz-1.7B-**Base**（仅 Base 支持参考音频克隆，VoiceDesign 不支持）。模型用 ModelScope 下载：
 
